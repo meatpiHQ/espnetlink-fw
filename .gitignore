@@ -1,3 +1,5 @@
+build/
+esp_idf_components/
 # Prerequisites
 *.d
 
@@ -50,3 +52,18 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+
+# docs
+docs/.nuxt
+docs/node_modules
+
+#Vehicle Profiles
+.vehicle_profiles/node_modules/
+
+#managed components
+managed_components/
+.vscode/
+.devcontainer/
+# Clangd Cache
+.cache/
+tools/https_test_server/test_certs/
