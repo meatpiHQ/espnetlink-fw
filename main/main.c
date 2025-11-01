@@ -15,6 +15,7 @@
 #include "usb/cdc_acm_host.h"
 
 #include "usb_cdc_host_manager.h"
+#include "modem_manager.h"
 
 // Change these values to match your needs
 #define EXAMPLE_BAUDRATE     (115200)
@@ -80,12 +81,21 @@ static void iface_tx_task(void *arg)
     const char *cmd = "ATI\r";
     while (1) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(usb_cdc_mgr_tx(iface, (const uint8_t *)cmd, strlen(cmd), 1000));
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(pdMS_TO_TICKS(10000));
     }
 }
 
 void app_main(void)
 {
+    //init modem manager here
+    
+    // Initialize BG95 modem (set 3M baud + HW flow control, ensure command mode)
+    if (modem_mgr_init() != ESP_OK) {
+        ESP_LOGE(TAG, "Modem init failed");
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(10000));
+    //init cdc manager
     device_disconnected_sem = xSemaphoreCreateBinary();
     assert(device_disconnected_sem);
 
