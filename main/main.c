@@ -16,6 +16,7 @@
 
 #include "usb_cdc_host_manager.h"
 #include "modem_manager.h"
+#include "hw_config.h"
 
 // Change these values to match your needs
 #define EXAMPLE_BAUDRATE     (115200)
@@ -90,7 +91,18 @@ void app_main(void)
     //init modem manager here
     
     // Initialize BG95 modem (set 3M baud + HW flow control, ensure command mode)
-    if (modem_mgr_init() != ESP_OK) {
+    const modem_mgr_config_t modem_cfg = {
+        .uart_port = LTE_UART_PORT,
+        .tx_pin = LTE_UART_TX_PIN,
+        .rx_pin = LTE_UART_RX_PIN,
+        .rts_pin = LTE_RTS_PIN,
+        .cts_pin = LTE_CTS_PIN,
+        .pwr_key_pin = LTE_PWR_KEY_PIN,
+        .status_pin = LTE_STATUS_PIN,
+        .dtr_pin = LTE_DTR_PIN,
+        .status_on_is_low = true, // BG95: STATUS low when ON
+    };
+    if (modem_mgr_init(&modem_cfg) != ESP_OK) {
         ESP_LOGE(TAG, "Modem init failed");
     }
 

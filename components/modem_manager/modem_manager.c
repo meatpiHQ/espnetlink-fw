@@ -66,10 +66,12 @@
 #include "driver/gpio.h"
 #include "driver/uart.h"
 
-#include "hw_config.h"
 #include "modem_manager.h"
 
 static const char *TAG = "modem_mgr";
+
+// Active configuration is copied from user-provided cfg in modem_mgr_init
+static modem_mgr_config_t s_cfg;
 
 /*
  * =============================================================================
@@ -154,14 +156,14 @@ static void sleep_ms(uint32_t ms)
 static void modem_gpio_init(void)
 {
     // PWR_KEY (active low)
-    gpio_reset_pin(LTE_PWR_KEY_PIN);
-    gpio_set_direction(LTE_PWR_KEY_PIN, GPIO_MODE_OUTPUT);
-    gpio_set_level(LTE_PWR_KEY_PIN, 1); // idle high
+    gpio_reset_pin(s_cfg.pwr_key_pin);
+    gpio_set_direction(s_cfg.pwr_key_pin, GPIO_MODE_OUTPUT);
+    gpio_set_level(s_cfg.pwr_key_pin, 1); // idle high
 
     // STATUS (input) - low when modem is ON per hw_config.h comment
-    gpio_reset_pin(LTE_STATUS_PIN);
-    gpio_set_direction(LTE_STATUS_PIN, GPIO_MODE_INPUT);
-    gpio_set_pull_mode(LTE_STATUS_PIN, GPIO_FLOATING);
+    gpio_reset_pin(s_cfg.status_pin);
+    gpio_set_direction(s_cfg.status_pin, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(s_cfg.status_pin, GPIO_FLOATING);
 
     // DTR (keep high to avoid sleep)
     // gpio_reset_pin(LTE_DTR_PIN);
@@ -176,9 +178,9 @@ static void modem_gpio_init(void)
  */
 static bool modem_status_is_on(void)
 {
-    int level = gpio_get_level(LTE_STATUS_PIN);
-    // Low when module is ON
-    return (level == 0);
+    int level = gpio_get_level(s_cfg.status_pin);
+    // Respect configured polarity
+    return s_cfg.status_on_is_low ? (level == 0) : (level != 0);
 }
 
 /**
@@ -191,9 +193,9 @@ static bool modem_status_is_on(void)
 static void modem_pwrkey_pulse(uint32_t ms)
 {
     // Active low pulse
-    gpio_set_level(LTE_PWR_KEY_PIN, 0);
+    gpio_set_level(s_cfg.pwr_key_pin, 0);
     sleep_ms(ms);
-    gpio_set_level(LTE_PWR_KEY_PIN, 1);
+    gpio_set_level(s_cfg.pwr_key_pin, 1);
 }
 
 /**
@@ -277,21 +279,23 @@ static esp_err_t modem_uart_setup(int baud, bool hwfc_on)
         .source_clk = UART_SCLK_DEFAULT,
     };
 
-    ESP_ERROR_CHECK(uart_driver_install(LTE_UART_PORT, UART_RX_BUF_SIZE, UART_TX_BUF_SIZE, 0, NULL, 0));
-    ESP_ERROR_CHECK(uart_param_config(LTE_UART_PORT, &cfg));
-    ESP_ERROR_CHECK(uart_set_pin(LTE_UART_PORT,
-                                 LTE_UART_TX_PIN,
-                                 LTE_UART_RX_PIN,
-                                 LTE_RTS_PIN,
-                                 LTE_CTS_PIN));
+    // Helper to map GPIO_NUM_NC to UART_PIN_NO_CHANGE
+    int tx = (s_cfg.tx_pin == GPIO_NUM_NC) ? UART_PIN_NO_CHANGE : (int)s_cfg.tx_pin;
+    int rx = (s_cfg.rx_pin == GPIO_NUM_NC) ? UART_PIN_NO_CHANGE : (int)s_cfg.rx_pin;
+    int rts = (s_cfg.rts_pin == GPIO_NUM_NC) ? UART_PIN_NO_CHANGE : (int)s_cfg.rts_pin;
+    int cts = (s_cfg.cts_pin == GPIO_NUM_NC) ? UART_PIN_NO_CHANGE : (int)s_cfg.cts_pin;
+
+    ESP_ERROR_CHECK(uart_driver_install(s_cfg.uart_port, UART_RX_BUF_SIZE, UART_TX_BUF_SIZE, 0, NULL, 0));
+    ESP_ERROR_CHECK(uart_param_config(s_cfg.uart_port, &cfg));
+    ESP_ERROR_CHECK(uart_set_pin(s_cfg.uart_port, tx, rx, rts, cts));
 
     if (hwfc_on)
     {
-        ESP_ERROR_CHECK(uart_set_hw_flow_ctrl(LTE_UART_PORT, UART_HW_FLOWCTRL_CTS_RTS, 64));
+        ESP_ERROR_CHECK(uart_set_hw_flow_ctrl(s_cfg.uart_port, UART_HW_FLOWCTRL_CTS_RTS, 64));
     }
     else
     {
-        ESP_ERROR_CHECK(uart_set_hw_flow_ctrl(LTE_UART_PORT, UART_HW_FLOWCTRL_DISABLE, 0));
+        ESP_ERROR_CHECK(uart_set_hw_flow_ctrl(s_cfg.uart_port, UART_HW_FLOWCTRL_DISABLE, 0));
     }
 
     return ESP_OK;
@@ -304,10 +308,10 @@ static esp_err_t modem_uart_setup(int baud, bool hwfc_on)
 static void modem_uart_teardown(void)
 {
     // Delete driver only if installed to avoid noisy "ALREADY NULL" logs
-    if (uart_is_driver_installed(LTE_UART_PORT))
+    if (uart_is_driver_installed(s_cfg.uart_port))
     {
         ESP_LOGI(TAG, "Tearing down UART driver");
-        uart_driver_delete(LTE_UART_PORT);
+        uart_driver_delete(s_cfg.uart_port);
     }
 }
 
@@ -319,7 +323,7 @@ static void modem_uart_teardown(void)
 static void modem_uart_set_baud(int baud)
 {
     ESP_LOGI(TAG, "Setting UART baud rate to %d", baud);
-    uart_set_baudrate(LTE_UART_PORT, baud);
+    uart_set_baudrate(s_cfg.uart_port, baud);
 }
 
 /*
@@ -337,8 +341,8 @@ static void modem_uart_set_baud(int baud)
 static esp_err_t at_write(const char *s)
 {
     size_t len = strlen(s);
-    int w = uart_write_bytes(LTE_UART_PORT, s, len);
-    uart_wait_tx_done(LTE_UART_PORT, pdMS_TO_TICKS(50));
+    int w = uart_write_bytes(s_cfg.uart_port, s, len);
+    uart_wait_tx_done(s_cfg.uart_port, pdMS_TO_TICKS(50));
     return (w == (int)len) ? ESP_OK : ESP_FAIL;
 }
 
@@ -358,7 +362,7 @@ static int at_read_line(char *buf, size_t max_len, uint32_t timeout_ms)
     while (now_ms() < deadline && idx + 1 < max_len)
     {
         uint8_t ch;
-        int r = uart_read_bytes(LTE_UART_PORT, &ch, 1, pdMS_TO_TICKS(20));
+    int r = uart_read_bytes(s_cfg.uart_port, &ch, 1, pdMS_TO_TICKS(20));
         if (r == 1)
         {
             // Skip leading CR/LF
@@ -554,7 +558,7 @@ static bool modem_log_cmd_lines(const char *cmd)
     bool got_any = false;
 
     // Best effort flush to reduce leftover echoes
-    uart_flush_input(LTE_UART_PORT);
+    uart_flush_input(s_cfg.uart_port);
 
     if (at_write(cmd) != ESP_OK)
     {
@@ -793,8 +797,18 @@ static esp_err_t configure_flow_and_baud(void)
  *
  * @see modem_manager.h for detailed API documentation
  */
-esp_err_t modem_mgr_init(void)
+esp_err_t modem_mgr_init(const modem_mgr_config_t *cfg)
 {
+    // Copy configuration
+    if (cfg == NULL) {
+        ESP_LOGE(TAG, "modem_mgr_init: cfg is NULL");
+        return ESP_ERR_INVALID_ARG;
+    }
+    s_cfg = *cfg;
+    // Default for status polarity if caller forgot to fill
+    // (BG95 uses LOW = ON)
+    // Note: We can't detect uninitialized bool, so keep caller value.
+
     ESP_LOGI(TAG, "Initializing modem manager");
 
     modem_gpio_init();
