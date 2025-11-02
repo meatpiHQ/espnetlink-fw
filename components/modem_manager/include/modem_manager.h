@@ -62,7 +62,7 @@ typedef struct {
 	gpio_num_t  cts_pin;      // CTS GPIO (required for HW flow control)
 
 	// Modem control pins
-	gpio_num_t  pwr_key_pin;  // Active-low power key control
+	gpio_num_t  pwr_key_pin;  // Active-high power key control
 	gpio_num_t  status_pin;   // Status indicator pin from modem
 	gpio_num_t  dtr_pin;      // Optional DTR pin (GPIO_NUM_NC if unused)
 

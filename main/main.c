@@ -15,11 +15,12 @@
 #include "usb/cdc_acm_host.h"
 
 #include "usb_cdc_host_manager.h"
+#include "usb_cdc_uart_bridge.h"
 #include "modem_manager.h"
 #include "hw_config.h"
 
 // Change these values to match your needs
-#define EXAMPLE_BAUDRATE     (115200)
+#define EXAMPLE_BAUDRATE     (2000000)
 #define EXAMPLE_STOP_BITS    (0)      // 0: 1 stopbit, 1: 1.5 stopbits, 2: 2 stopbits
 #define EXAMPLE_PARITY       (0)      // 0: None, 1: Odd, 2: Even, 3: Mark, 4: Space
 #define EXAMPLE_DATA_BITS    (8)
@@ -55,7 +56,7 @@ static void handle_event0(const cdc_acm_host_dev_event_data_t *event, void *user
 static bool handle_rx2(const uint8_t *data, size_t data_len, void *arg)
 {
     ESP_LOGI(TAG, "RX iface2: %.*s", (int)data_len, (const char *)data);
-    ESP_LOG_BUFFER_HEX(TAG, data, data_len);
+    // ESP_LOG_BUFFER_HEX(TAG, data, data_len);
     return true;
 }
 
@@ -81,6 +82,7 @@ static void iface_tx_task(void *arg)
     const uint8_t iface = (uint32_t)arg; // 0 or 2
     const char *cmd = "ATI\r";
     while (1) {
+        ESP_LOGI(TAG, "Sending command on iface %u: %s", iface, cmd);
         ESP_ERROR_CHECK_WITHOUT_ABORT(usb_cdc_mgr_tx(iface, (const uint8_t *)cmd, strlen(cmd), 1000));
         vTaskDelay(pdMS_TO_TICKS(10000));
     }
@@ -106,33 +108,76 @@ void app_main(void)
         ESP_LOGE(TAG, "Modem init failed");
     }
 
-    vTaskDelay(pdMS_TO_TICKS(10000));
-    //init cdc manager
+    vTaskDelay(pdMS_TO_TICKS(15000));
+
     device_disconnected_sem = xSemaphoreCreateBinary();
     assert(device_disconnected_sem);
 
     // Install host + CDC-ACM and start event task
     ESP_ERROR_CHECK(usb_cdc_mgr_init());
 
-    // Open interface 0
-    ESP_ERROR_CHECK(usb_cdc_mgr_open(USB_VID_QINHENG, USB_PID_CH342, USB_CDC_IFACE_0,
-                                     5000, 5120, 5120, handle_event0, handle_rx0, NULL));
-    ESP_ERROR_CHECK(usb_cdc_mgr_set_line_coding(USB_CDC_IFACE_0,
-                                                EXAMPLE_BAUDRATE,
-                                                EXAMPLE_STOP_BITS,
-                                                EXAMPLE_PARITY,
-                                                EXAMPLE_DATA_BITS));
 
-    // Open interface 2
+
     ESP_ERROR_CHECK(usb_cdc_mgr_open(USB_VID_QINHENG, USB_PID_CH342, USB_CDC_IFACE_2,
-                                     5000, 5120, 5120, handle_event2, handle_rx2, NULL));
+                                     5000, 1024*15, 1024*15, handle_event2, handle_rx2, NULL));
     ESP_ERROR_CHECK(usb_cdc_mgr_set_line_coding(USB_CDC_IFACE_2,
-                                                EXAMPLE_BAUDRATE,
+                                                115200,
                                                 EXAMPLE_STOP_BITS,
                                                 EXAMPLE_PARITY,
                                                 EXAMPLE_DATA_BITS));
+    // Open interface 0
+    // ESP_ERROR_CHECK(usb_cdc_mgr_open(USB_VID_QINHENG, USB_PID_CH342, USB_CDC_IFACE_0,
+    //                                  5000, 5120, 5120, handle_event0, handle_rx0, NULL));
+    // ESP_ERROR_CHECK(usb_cdc_mgr_set_line_coding(USB_CDC_IFACE_0,
+    //                                             2000000,
+    //                                             EXAMPLE_STOP_BITS,
+    //                                             EXAMPLE_PARITY,
+    //                                             EXAMPLE_DATA_BITS));
+
+
+    // Start UART<->USB bridge: interface 0 <-> modem UART
+    usb_cdc_uart_bridge_config_t br = {
+        // UART (use LTE_* from hw_config.h)
+        .uart_port = LTE_UART_PORT,
+        .uart_tx_pin = LTE_UART_TX_PIN,
+        .uart_rx_pin = LTE_UART_RX_PIN,
+        .use_hw_flow = true,
+        .uart_rts_pin = LTE_RTS_PIN,
+        .uart_cts_pin = LTE_CTS_PIN,
+        .uart_baud = 3000000,       // match modem_mgr target
+        .uart_data_bits = 8,
+        .uart_parity = 0,
+        .uart_stop_bits = 1,
+
+        // USB device selection (CH342 interface 0)
+        .usb_vid = USB_VID_QINHENG,
+        .usb_pid = USB_PID_CH342,
+        .usb_interface = USB_CDC_IFACE_0,
+
+        // USB line coding (match UART)
+        .usb_baud = 3000000,
+        .usb_data_bits = 8,
+        .usb_parity = 0,
+        .usb_stop_bits = 0,         // 0=1 stop bit
+
+        // Buffers/timeouts
+        .usb_conn_timeout_ms = 5000,
+        .usb_tx_timeout_ms = 1000,
+        .usb_out_buffer = 1024*15,
+        .usb_in_buffer = 1024*15,
+
+        // Optional taps (none)
+        .event_cb = NULL,
+        .rx_tap_cb = NULL,
+        .user_ctx = NULL,
+    };
+
+    ESP_ERROR_CHECK(usb_cdc_uart_bridge_start(&br));
+
+    // Optionally, you can still use interface 0 independently as before
+    //init cdc manager for other interfaces
 
     // Start TX tasks for each interface
-    xTaskCreate(iface_tx_task, "iface0_tx", 4096, (void *)USB_CDC_IFACE_0, 5, NULL);
-    xTaskCreate(iface_tx_task, "iface2_tx", 4096, (void *)USB_CDC_IFACE_2, 5, NULL);
+    // xTaskCreate(iface_tx_task, "iface0_tx", 4096, (void *)USB_CDC_IFACE_0, 5, NULL);
+    // xTaskCreate(iface_tx_task, "iface2_tx", 4096, (void *)USB_CDC_IFACE_2, 5, NULL);
 }

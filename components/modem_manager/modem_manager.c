@@ -149,7 +149,7 @@ static void sleep_ms(uint32_t ms)
  * @brief Initialize GPIO pins for modem control
  *
  * Configures three essential GPIO pins:
- * - PWR_KEY: Output pin for power control (active low, idle high)
+ * - PWR_KEY: Output pin for power control (active high, idle low)
  * - STATUS: Input pin to monitor modem power state (low when ON)
  * - DTR: Output pin kept high to prevent modem sleep mode
  */
@@ -158,7 +158,7 @@ static void modem_gpio_init(void)
     // PWR_KEY (active low)
     gpio_reset_pin(s_cfg.pwr_key_pin);
     gpio_set_direction(s_cfg.pwr_key_pin, GPIO_MODE_OUTPUT);
-    gpio_set_level(s_cfg.pwr_key_pin, 1); // idle high
+    gpio_set_level(s_cfg.pwr_key_pin, 0); 
 
     // STATUS (input) - low when modem is ON per hw_config.h comment
     gpio_reset_pin(s_cfg.status_pin);
@@ -186,16 +186,16 @@ static bool modem_status_is_on(void)
 /**
  * @brief Generate a PWR_KEY pulse to toggle modem power state
  * @param ms Duration of the pulse in milliseconds
- * @note PWR_KEY is active low. Different pulse durations trigger different actions:
+ * @note PWR_KEY is active high. Different pulse durations trigger different actions:
  *       - 500-800ms: Toggle power state (ON->OFF or OFF->ON)
  *       - 1500ms+: Graceful power-off with proper shutdown sequence
  */
 static void modem_pwrkey_pulse(uint32_t ms)
 {
     // Active low pulse
-    gpio_set_level(s_cfg.pwr_key_pin, 0);
-    sleep_ms(ms);
     gpio_set_level(s_cfg.pwr_key_pin, 1);
+    sleep_ms(ms);
+    gpio_set_level(s_cfg.pwr_key_pin, 0);
 }
 
 /**

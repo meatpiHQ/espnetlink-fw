@@ -172,6 +172,14 @@ esp_err_t usb_cdc_mgr_tx(uint8_t interface_idx,
  */
 void usb_cdc_mgr_close_all(void);
 
+/**
+ * @brief Close a specific CDC interface if opened
+ *
+ * @param interface_idx Interface index (e.g., 0 or 2)
+ * @return ESP_OK if closed or not open, ESP_ERR_INVALID_ARG for bad index
+ */
+esp_err_t usb_cdc_mgr_close(uint8_t interface_idx);
+
 #ifdef __cplusplus
 }
 #endif

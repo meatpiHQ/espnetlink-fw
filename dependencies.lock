@@ -13,7 +13,7 @@ dependencies:
       - if: target not in ["linux"]
       version: ^1.0.0
     source:
-      registry_url: https://components.espressif.com/
+      registry_url: https://components.espressif.com
       type: service
     targets:
     - esp32s2
@@ -22,6 +22,20 @@ dependencies:
     - esp32h4
     - linux
     version: 2.1.1
+  espressif/usb_host_ch34x_vcp:
+    component_hash: cc6f17936a11aa0ba460e716bd9b70fcd445824bcc7882afbe3ede3513f80c59
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.4'
+    - name: espressif/usb_host_cdc_acm
+      registry_url: https://components.espressif.com
+      require: public
+      version: ^2.1.0
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 2.2.0
   espressif/usb_host_cp210x_vcp:
     component_hash: c0404c598e2620fe88c35b5bf24d8e3b3ded41d9946fc865843be7f2f75da40e
     dependencies:
@@ -68,25 +82,12 @@ dependencies:
     source:
       type: idf
     version: 5.5.1
-  meatpihq/usb_host_ch34x_vcp:
-    component_hash: 5d131ae2ba7ca9e6356f5163fa33d225c2fcaeaed5140e15ea4912c172870312
-    dependencies:
-    - name: espressif/usb_host_cdc_acm
-      public: true
-      version: '>=1.0.4,<3.0.0'
-    - name: idf
-      version: '>=4.4'
-    source:
-      git: https://github.com/meatpiHQ/esp-usb.git
-      path: host/class/cdc/usb_host_ch34x_vcp
-      type: git
-    version: 4e2a62b4b0e77bc1c2f1fd684ad61f010d60150b
 direct_dependencies:
+- espressif/usb_host_ch34x_vcp
 - espressif/usb_host_cp210x_vcp
 - espressif/usb_host_ftdi_vcp
 - espressif/usb_host_vcp
 - idf
-- meatpihq/usb_host_ch34x_vcp
-manifest_hash: 7512e7db8eb6e89435d63ea078a0476d8f4d55b7592678d156a1c623788e24a0
+manifest_hash: fadb095e1fdb5b54aac297047fdd1137157ffe413ed0d14e4941dc50d87fb972
 target: esp32s3
 version: 2.0.0

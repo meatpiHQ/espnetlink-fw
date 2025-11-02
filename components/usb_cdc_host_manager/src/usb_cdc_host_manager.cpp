@@ -380,3 +380,22 @@ extern "C" void usb_cdc_mgr_close_all(void)
 
     ESP_LOGI(TAG, "All USB CDC devices closed");
 }
+
+extern "C" esp_err_t usb_cdc_mgr_close(uint8_t interface_idx)
+{
+    if (interface_idx == USB_CDC_IFACE_0) {
+        if (s_vcp_if0) {
+            ESP_LOGI(TAG, "Closing interface %u", USB_CDC_IFACE_0);
+            s_vcp_if0.reset();
+        }
+        return ESP_OK;
+    }
+    if (interface_idx == USB_CDC_IFACE_2) {
+        if (s_vcp_if2) {
+            ESP_LOGI(TAG, "Closing interface %u", USB_CDC_IFACE_2);
+            s_vcp_if2.reset();
+        }
+        return ESP_OK;
+    }
+    return ESP_ERR_INVALID_ARG;
+}
