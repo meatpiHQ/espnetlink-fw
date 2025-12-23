@@ -1,10 +1,44 @@
 dependencies:
-  espressif/usb_host_cdc_acm:
-    component_hash: 0ca1a47f3b568ad539f2db7938aaa2a64f3017bd50a5ee9b410d2f9d7425ecef
+  espressif/esp_tinyusb:
+    component_hash: 6f1f0c140990bf27a86611e3c1f47f9fa8468bffc3bf1eb6d551cb09f31f8908
     dependencies:
     - name: idf
       require: private
-      version: '>=4.4'
+      version: '>=5.0'
+    - name: espressif/tinyusb
+      registry_url: https://components.espressif.com
+      require: public
+      version: '>=0.17.0~2'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    targets:
+    - esp32s2
+    - esp32s3
+    - esp32p4
+    - esp32h4
+    version: 2.0.1~1
+  espressif/tinyusb:
+    component_hash: 5ea9d3b6d6b0734a0a0b3491967aa0e1bece2974132294dbda5dd2839b247bfa
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    targets:
+    - esp32s2
+    - esp32s3
+    - esp32p4
+    - esp32h4
+    version: 0.19.0~2
+  espressif/usb_host_cdc_acm:
+    component_hash: 4fc5789ef080e3038d8e09598807000f44d045cff5cc1267d9d4dfe0e4e775fb
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
     - name: espressif/usb
       registry_url: https://components.espressif.com
       require: public
@@ -21,7 +55,7 @@ dependencies:
     - esp32p4
     - esp32h4
     - linux
-    version: 2.1.1
+    version: 2.2.0
   espressif/usb_host_ch34x_vcp:
     component_hash: cc6f17936a11aa0ba460e716bd9b70fcd445824bcc7882afbe3ede3513f80c59
     dependencies:
@@ -83,11 +117,12 @@ dependencies:
       type: idf
     version: 5.5.1
 direct_dependencies:
+- espressif/esp_tinyusb
 - espressif/usb_host_ch34x_vcp
 - espressif/usb_host_cp210x_vcp
 - espressif/usb_host_ftdi_vcp
 - espressif/usb_host_vcp
 - idf
-manifest_hash: fadb095e1fdb5b54aac297047fdd1137157ffe413ed0d14e4941dc50d87fb972
+manifest_hash: 35aec97d331224da36de1f73adf786b86f3af5d2511098ba78feeeb581f9db63
 target: esp32s3
 version: 2.0.0

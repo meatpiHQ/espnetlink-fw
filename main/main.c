@@ -11,13 +11,24 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 
+#include "hw_config.h"
+
+// Select exactly one mode (set one to 1, the other to 0)
+#define USB_HOST_MODE        0
+#define USB_DEV_MODE         1
+
+#if USB_HOST_MODE
 #include "usb/usb_host.h"
 #include "usb/cdc_acm_host.h"
 
 #include "usb_cdc_host_manager.h"
 #include "usb_cdc_uart_bridge.h"
 #include "modem_manager.h"
-#include "hw_config.h"
+#endif
+
+#if USB_DEV_MODE
+#include "usb_dev_bridge.h"
+#endif
 
 // Change these values to match your needs
 #define EXAMPLE_BAUDRATE     (2000000)
@@ -26,9 +37,13 @@
 #define EXAMPLE_DATA_BITS    (8)
 
 static const char *TAG = "VCP manager example";
+
+#if USB_HOST_MODE
 static SemaphoreHandle_t device_disconnected_sem;
+#endif
 
 // RX callbacks for each interface
+#if USB_HOST_MODE
 static bool handle_rx0(const uint8_t *data, size_t data_len, void *arg)
 {
     ESP_LOGI(TAG, "RX iface0: %.*s", (int)data_len, (const char *)data);
@@ -87,9 +102,15 @@ static void iface_tx_task(void *arg)
         vTaskDelay(pdMS_TO_TICKS(10000));
     }
 }
+#endif // USB_HOST_MODE
 
 void app_main(void)
 {
+    #if (USB_HOST_MODE && USB_DEV_MODE)
+    #error "Select exactly one of USB_HOST_MODE or USB_DEV_MODE"
+    #elif (!USB_HOST_MODE && !USB_DEV_MODE)
+    #error "Select exactly one of USB_HOST_MODE or USB_DEV_MODE"
+    #elif USB_HOST_MODE
     //init modem manager here
     
     // Initialize BG95 modem (set 3M baud + HW flow control, ensure command mode)
@@ -173,7 +194,9 @@ void app_main(void)
     };
 
     ESP_ERROR_CHECK(usb_cdc_uart_bridge_start(&br));
-
+    #elif USB_DEV_MODE
+    ESP_ERROR_CHECK(usb_dev_bridge_start());
+    #endif
     // Optionally, you can still use interface 0 independently as before
     //init cdc manager for other interfaces
 

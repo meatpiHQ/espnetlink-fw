@@ -2,3 +2,7 @@
 # Espressif IoT Development Framework (ESP-IDF) Project Minimal Configuration
 #
 CONFIG_COMPILER_CXX_EXCEPTIONS=y
+
+# USB Device (TinyUSB) - 2x CDC-ACM ports (LTE + GPS)
+CONFIG_TINYUSB_CDC_ENABLED=y
+CONFIG_TINYUSB_CDC_COUNT=2

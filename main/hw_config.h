@@ -2,6 +2,7 @@
 #define HW_CONFIG_H
 
 #include "driver/gpio.h"
+#include "driver/uart.h"
 
 // GPIO Pin Definitions
 #define LED_GPIO                GPIO_NUM_2
