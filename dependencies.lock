@@ -116,6 +116,16 @@ dependencies:
     source:
       type: idf
     version: 5.5.1
+  igrr/libnmea:
+    component_hash: d6e78e853e75882c17cd4f200d110b84824e728cefbb84152227f0f4f98d8a50
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.2'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 0.2.1
 direct_dependencies:
 - espressif/esp_tinyusb
 - espressif/usb_host_ch34x_vcp
@@ -123,6 +133,7 @@ direct_dependencies:
 - espressif/usb_host_ftdi_vcp
 - espressif/usb_host_vcp
 - idf
-manifest_hash: 35aec97d331224da36de1f73adf786b86f3af5d2511098ba78feeeb581f9db63
+- igrr/libnmea
+manifest_hash: 817904c80b88f09f7e5508b6869184dc67c9affe224ad191de68dd168ccf70a6
 target: esp32s3
 version: 2.0.0

@@ -6,3 +6,4 @@ dependencies:
   usb_host_vcp: ^1
   idf: '>=5.1.0'
   espressif/esp_tinyusb: ^2.0.1~1
+  igrr/libnmea: ^0.2.1

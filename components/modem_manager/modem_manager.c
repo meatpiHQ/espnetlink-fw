@@ -166,9 +166,12 @@ static void modem_gpio_init(void)
     gpio_set_pull_mode(s_cfg.status_pin, GPIO_FLOATING);
 
     // DTR (keep high to avoid sleep)
-    // gpio_reset_pin(LTE_DTR_PIN);
-    // gpio_set_direction(LTE_DTR_PIN, GPIO_MODE_OUTPUT);
-    // gpio_set_level(LTE_DTR_PIN, 1);
+    if (s_cfg.dtr_pin != GPIO_NUM_NC && (int)s_cfg.dtr_pin >= 0)
+    {
+        gpio_reset_pin(s_cfg.dtr_pin);
+        gpio_set_direction(s_cfg.dtr_pin, GPIO_MODE_OUTPUT);
+        gpio_set_level(s_cfg.dtr_pin, 1);
+    }
 }
 
 /**
@@ -597,6 +600,66 @@ static bool modem_log_cmd_lines(const char *cmd)
 }
 
 /**
+ * @brief Execute an AT command and wait for OK/ERROR while logging all lines
+ *
+ * Useful for commands that may take longer (e.g., AT&W).
+ *
+ * @param cmd AT command with CR terminator
+ * @param total_timeout_ms Maximum time to wait in milliseconds
+ * @return true if OK received, false otherwise
+ */
+static bool at_exec_wait_ok_log_lines(const char *cmd, uint32_t total_timeout_ms)
+{
+    char line[256];
+
+    // Best effort flush to reduce leftover echoes
+    uart_flush_input(s_cfg.uart_port);
+
+    if (at_write(cmd) != ESP_OK) {
+        return false;
+    }
+
+    const int64_t deadline = now_ms() + total_timeout_ms;
+    // Prepare a printable command name (strip trailing CR)
+    char cmd_print[64];
+    size_t cmd_len = strlen(cmd);
+    size_t plen = cmd_len;
+    if (plen > 0 && cmd[plen - 1] == '\r') {
+        plen--;
+    }
+    if (plen >= sizeof(cmd_print)) {
+        plen = sizeof(cmd_print) - 1;
+    }
+    memcpy(cmd_print, cmd, plen);
+    cmd_print[plen] = '\0';
+
+    while (now_ms() < deadline) {
+        int n = at_read_line(line, sizeof(line), 500);
+        if (n < 0) {
+            continue;
+        }
+
+        // Skip echo of the command
+        if (cmd_print[0] != '\0' && strcmp(line, cmd_print) == 0) {
+            continue;
+        }
+
+        if (strcmp(line, "OK") == 0) {
+            ESP_LOGI(TAG, "%s -> OK", cmd_print);
+            return true;
+        }
+        if (strcmp(line, "ERROR") == 0) {
+            ESP_LOGW(TAG, "%s -> ERROR", cmd_print);
+            return false;
+        }
+
+        ESP_LOGI(TAG, "%s", line);
+    }
+
+    return false;
+}
+
+/**
  * @brief Query and log modem firmware version information
  * @note Tries AT+GMR (firmware revision) first, falls back to ATI if that fails
  *       Logs version information directly to console via ESP_LOGI
@@ -711,9 +774,18 @@ static esp_err_t configure_flow_and_baud(void)
     if (!(rx == 2 && tx == 2))
     {
         ESP_LOGI(TAG, "Enabling HW flow control (AT+IFC=2,2)");
+
+        // Important: Many modems apply IFC immediately, and if the host UART isn't
+        // already configured for RTS/CTS, the modem may stop transmitting (including the OK).
+        // So enable UART HW flow control BEFORE sending AT+IFC.
+        ESP_ERROR_CHECK(uart_set_hw_flow_ctrl(s_cfg.uart_port, UART_HW_FLOWCTRL_CTS_RTS, 64));
+        sleep_ms(20);
+
         if (at_write("AT+IFC=2,2\r") != ESP_OK || !at_expect_ok(1000))
         {
             ESP_LOGE(TAG, "Failed to set IFC");
+            // Revert UART flow control so caller can still communicate
+            ESP_ERROR_CHECK(uart_set_hw_flow_ctrl(s_cfg.uart_port, UART_HW_FLOWCTRL_DISABLE, 0));
             return ESP_FAIL;
         }
         changed = true;
@@ -754,9 +826,14 @@ static esp_err_t configure_flow_and_baud(void)
     if (changed)
     {
         ESP_LOGI(TAG, "Storing configuration (AT&W)");
-        if (at_write("AT&W\r") != ESP_OK || !at_expect_ok(2000))
+        // AT&W may take several seconds on some firmware. Log all response lines.
+        if (!at_exec_wait_ok_log_lines("AT&W\r", 10000))
         {
-            ESP_LOGW(TAG, "AT&W failed or not supported");
+            ESP_LOGW(TAG, "AT&W failed or timed out; trying AT&W0");
+            if (!at_exec_wait_ok_log_lines("AT&W0\r", 10000))
+            {
+                ESP_LOGW(TAG, "AT&W0 also failed or timed out");
+            }
         }
     }
 
