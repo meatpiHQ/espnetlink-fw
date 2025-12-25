@@ -16,6 +16,7 @@
 // Select exactly one mode (set one to 1, the other to 0)
 #define USB_HOST_MODE        0
 #define USB_DEV_MODE         1
+#define USB_DEV_ETHERNET_MODE 0
 
 #if USB_HOST_MODE
 #include "usb/usb_host.h"
