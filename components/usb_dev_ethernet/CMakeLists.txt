@@ -1,11 +1,11 @@
 set(TINYUSB_NETLIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../managed_components/espressif__tinyusb/lib/networking")
 
 idf_component_register(
-    SRCS "usb_dev_ethernet.c"
+    SRCS "usb_dev_ethernet_rndis.c"
          "${TINYUSB_NETLIB_DIR}/dhserver.c"
     INCLUDE_DIRS "include"
                  "${TINYUSB_NETLIB_DIR}"
-    REQUIRES espressif__esp_tinyusb esp_netif lwip
+    REQUIRES cherry-embedded__cherryusb esp_netif lwip
 )
 
 # ESP-IDF builds with warnings-as-errors; TinyUSB's dhserver.c can trigger -Waddress

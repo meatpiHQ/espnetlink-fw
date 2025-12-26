@@ -1,4 +1,18 @@
 dependencies:
+  cherry-embedded/cherryusb:
+    component_hash: ec3fda70779076a4a996abc52684fcafe4c61b269b722b775562f96c042c08f6
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.4.1'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    targets:
+    - esp32s2
+    - esp32s3
+    - esp32p4
+    version: 1.5.2~2
   espressif/esp_modem:
     component_hash: 07b6ca85dc0c1edbcd76f650005c74067001db138db6bfa106bf05567adca4af
     dependencies:
@@ -137,6 +151,7 @@ dependencies:
       type: service
     version: 0.2.1
 direct_dependencies:
+- cherry-embedded/cherryusb
 - espressif/esp_modem
 - espressif/esp_tinyusb
 - espressif/usb_host_ch34x_vcp
@@ -145,6 +160,6 @@ direct_dependencies:
 - espressif/usb_host_vcp
 - idf
 - igrr/libnmea
-manifest_hash: 67dc3a9b9de675730f26edf029d6ed1be558796be68634521f9fdc21c56a066d
+manifest_hash: 8152a6941973590f2e7c98b53d58896ab5a70e01223f1980e5c64518f7ddde7f
 target: esp32s3
 version: 2.0.0
