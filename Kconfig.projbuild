@@ -1,0 +1,5 @@
+# (Intentionally left blank)
+#
+# Note: This project does not define custom Kconfig options for app-mode selection.
+# Use the compile-time switches in main/main.c (USB_HOST_MODE / USB_DEV_MODE / USB_DEV_ETHERNET_MODE)
+# and the standard ESP-IDF TinyUSB settings (menuconfig) for class enablement.

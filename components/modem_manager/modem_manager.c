@@ -479,25 +479,49 @@ static bool at_query_prefix(const char *cmd, const char *prefix, char *out, size
     char line[256];
     char cmdline[64];
     snprintf(cmdline, sizeof(cmdline), "%s\r", cmd);
+
+    // Best effort flush to reduce leftover responses interfering with parsing
+    uart_flush_input(s_cfg.uart_port);
+
     if (at_write(cmdline) != ESP_OK)
     {
         return false;
     }
 
-    // Expect response line (e.g., "+IFC: 2,2"), then OK
-    int n = at_read_line(line, sizeof(line), 1000);
-    if (n <= 0)
+    // Read multiple lines until we find the prefixed response or hit a deadline.
+    // (Some firmwares echo, insert blank lines, or print extra URCs.)
+    const int64_t deadline = now_ms() + 2000;
+    bool found = false;
+    while (now_ms() < deadline)
     {
-        return false;
-    }
-    if (strncmp(line, prefix, strlen(prefix)) != 0)
-    {
-        // Might be echo or something else; read next line once more
-        n = at_read_line(line, sizeof(line), 500);
-        if (n <= 0 || strncmp(line, prefix, strlen(prefix)) != 0)
+        int n = at_read_line(line, sizeof(line), 500);
+        if (n <= 0)
+        {
+            continue;
+        }
+        if (strcmp(line, "OK") == 0)
+        {
+            break;
+        }
+        if (strcmp(line, "ERROR") == 0)
         {
             return false;
         }
+        // Skip echo of the command
+        if (strcmp(line, cmd) == 0)
+        {
+            continue;
+        }
+        if (strncmp(line, prefix, strlen(prefix)) == 0)
+        {
+            found = true;
+            break;
+        }
+    }
+
+    if (!found)
+    {
+        return false;
     }
 
     // Copy tail after prefix and optional spaces/colon
@@ -508,6 +532,8 @@ static bool at_query_prefix(const char *cmd, const char *prefix, char *out, size
     }
     strlcpy(out, p, out_len);
 
+
+    // Consume remaining lines until OK/ERROR
     return at_expect_ok(1000);
 }
 
@@ -760,6 +786,9 @@ static esp_err_t configure_flow_and_baud(void)
 {
     bool changed = false;
 
+    bool ifc_known = false;
+    bool ipr_known = false;
+
     // Query current IFC
     char resp[64];
     int rx = -1, tx = -1;
@@ -768,10 +797,15 @@ static esp_err_t configure_flow_and_baud(void)
         if (parse_ifc(resp, &rx, &tx))
         {
             ESP_LOGI(TAG, "Current IFC: %d,%d", rx, tx);
+            ifc_known = true;
         }
     }
+    else
+    {
+        ESP_LOGW(TAG, "AT+IFC? query failed; will not change flow control");
+    }
 
-    if (!(rx == 2 && tx == 2))
+    if (ifc_known && !(rx == 2 && tx == 2))
     {
         ESP_LOGI(TAG, "Enabling HW flow control (AT+IFC=2,2)");
 
@@ -798,10 +832,15 @@ static esp_err_t configure_flow_and_baud(void)
         if (parse_ipr(resp, &cur_baud))
         {
             ESP_LOGI(TAG, "Current IPR: %d", cur_baud);
+            ipr_known = true;
         }
     }
+    else
+    {
+        ESP_LOGW(TAG, "AT+IPR? query failed; will not change baud");
+    }
 
-    if (cur_baud != BAUD_REQ)
+    if (ipr_known && cur_baud != BAUD_REQ)
     {
         ESP_LOGI(TAG, "Setting baud to %d", BAUD_REQ);
         char cmd[32];

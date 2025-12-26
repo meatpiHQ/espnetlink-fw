@@ -7,6 +7,9 @@
 extern "C" {
 #endif
 
+// Pull in ESP-IDF configuration (e.g., CONFIG_TINYUSB_NET_MODE_NCM)
+#include "sdkconfig.h"
+
 // Enable device stack
 #define CFG_TUD_ENABLED 1
 
@@ -20,6 +23,13 @@ extern "C" {
 
 // Device class drivers
 #define CFG_TUD_CDC 2
+
+// CDC-NCM (USB Ethernet)
+// TinyUSB uses CFG_TUD_NCM to compile the NCM class driver.
+// Keep it enabled when the project config enables NCM mode.
+#if defined(CONFIG_TINYUSB_NET_MODE_NCM) && CONFIG_TINYUSB_NET_MODE_NCM
+#define CFG_TUD_NCM 1
+#endif
 
 // Endpoint0 size
 #ifndef CFG_TUD_ENDPOINT0_SIZE

@@ -15,8 +15,8 @@
 
 // Select exactly one mode (set one to 1, the other to 0)
 #define USB_HOST_MODE        0
-#define USB_DEV_MODE         1
-#define USB_DEV_ETHERNET_MODE 0
+#define USB_DEV_MODE         0
+#define USB_DEV_ETHERNET_MODE 1
 
 #if USB_HOST_MODE
 #include "usb/usb_host.h"
@@ -31,6 +31,10 @@
 #include "usb_dev_bridge.h"
 #endif
 
+#if USB_DEV_ETHERNET_MODE
+#include "usb_dev_ethernet.h"
+#endif
+
 // Change these values to match your needs
 #define EXAMPLE_BAUDRATE     (2000000)
 #define EXAMPLE_STOP_BITS    (0)      // 0: 1 stopbit, 1: 1.5 stopbits, 2: 2 stopbits
@@ -38,6 +42,56 @@
 #define EXAMPLE_DATA_BITS    (8)
 
 static const char *TAG = "VCP manager example";
+
+#if USB_DEV_ETHERNET_MODE
+// Optional: bring up BG95 PPPoS upstream and share it over USB-NCM.
+// (No Kconfig use here; just flip this macro.)
+#define ENABLE_LTE_UPSTREAM_PPPOS  1
+
+#if ENABLE_LTE_UPSTREAM_PPPOS
+#include "lte_upstream_pppos.h"
+
+static void lte_upstream_task(void *arg)
+{
+    (void)arg;
+
+    const lte_upstream_pppos_config_t cfg = {
+        .modem = {
+            .uart_port = LTE_UART_PORT,
+            .tx_pin = LTE_UART_TX_PIN,
+            .rx_pin = LTE_UART_RX_PIN,
+            .rts_pin = LTE_RTS_PIN,
+            .cts_pin = LTE_CTS_PIN,
+            .pwr_key_pin = LTE_PWR_KEY_PIN,
+            .status_pin = LTE_STATUS_PIN,
+            .dtr_pin = LTE_DTR_PIN,
+            .status_on_is_low = true,
+        },
+
+        // TODO: set your APN
+        .apn = "simbase",
+        .user = NULL,
+        .pass = NULL,
+
+        .init_modem_manager = true,
+        .baud_rate = 3000000,
+        .hw_flow_control = true,
+
+        .enable_usb_ncm_sharing = true,
+        .connect_timeout_ms = 0,
+    };
+
+    ESP_LOGI(TAG, "Starting LTE upstream PPPoS...");
+    esp_err_t err = lte_upstream_pppos_start(&cfg);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "lte_upstream_pppos_start failed: %s", esp_err_to_name(err));
+    }
+
+    vTaskDelete(NULL);
+}
+#endif // ENABLE_LTE_UPSTREAM_PPPOS
+#endif
 
 #if USB_HOST_MODE
 static SemaphoreHandle_t device_disconnected_sem;
@@ -107,10 +161,8 @@ static void iface_tx_task(void *arg)
 
 void app_main(void)
 {
-    #if (USB_HOST_MODE && USB_DEV_MODE)
-    #error "Select exactly one of USB_HOST_MODE or USB_DEV_MODE"
-    #elif (!USB_HOST_MODE && !USB_DEV_MODE)
-    #error "Select exactly one of USB_HOST_MODE or USB_DEV_MODE"
+    #if ((USB_HOST_MODE + USB_DEV_MODE + USB_DEV_ETHERNET_MODE) != 1)
+    #error "Select exactly one of USB_HOST_MODE, USB_DEV_MODE, USB_DEV_ETHERNET_MODE"
     #elif USB_HOST_MODE
     //init modem manager here
     
@@ -197,6 +249,12 @@ void app_main(void)
     ESP_ERROR_CHECK(usb_cdc_uart_bridge_start(&br));
     #elif USB_DEV_MODE
     ESP_ERROR_CHECK(usb_dev_bridge_start());
+    #elif USB_DEV_ETHERNET_MODE
+    ESP_ERROR_CHECK(usb_dev_ethernet_start());
+
+#if USB_DEV_ETHERNET_MODE && ENABLE_LTE_UPSTREAM_PPPOS
+    (void)xTaskCreate(lte_upstream_task, "lte_pppos", 6144, NULL, 5, NULL);
+#endif
     #endif
     // Optionally, you can still use interface 0 independently as before
     //init cdc manager for other interfaces

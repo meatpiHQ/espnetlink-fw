@@ -1,4 +1,14 @@
 dependencies:
+  espressif/esp_modem:
+    component_hash: 07b6ca85dc0c1edbcd76f650005c74067001db138db6bfa106bf05567adca4af
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.1'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 2.0.0
   espressif/esp_tinyusb:
     component_hash: 6f1f0c140990bf27a86611e3c1f47f9fa8468bffc3bf1eb6d551cb09f31f8908
     dependencies:
@@ -127,6 +137,7 @@ dependencies:
       type: service
     version: 0.2.1
 direct_dependencies:
+- espressif/esp_modem
 - espressif/esp_tinyusb
 - espressif/usb_host_ch34x_vcp
 - espressif/usb_host_cp210x_vcp
@@ -134,6 +145,6 @@ direct_dependencies:
 - espressif/usb_host_vcp
 - idf
 - igrr/libnmea
-manifest_hash: 817904c80b88f09f7e5508b6869184dc67c9affe224ad191de68dd168ccf70a6
+manifest_hash: 67dc3a9b9de675730f26edf029d6ed1be558796be68634521f9fdc21c56a066d
 target: esp32s3
 version: 2.0.0
