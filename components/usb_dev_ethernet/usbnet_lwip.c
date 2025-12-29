@@ -138,7 +138,6 @@ void usbnet_lwip_start_in_tcpip(void *arg)
     }
 
     memset(&st->dhcp_cfg, 0, sizeof(st->dhcp_cfg));
-    st->dhcp_cfg.netif = &st->usbnetif;
     st->dhcp_cfg.router = st->ipaddr;
     st->dhcp_cfg.port = 67;
 

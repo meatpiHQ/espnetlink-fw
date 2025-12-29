@@ -209,9 +209,6 @@ static dhcp_entry_t s_dhcp_entries[] = {
 };
 
 static dhcp_config_t s_dhcp_cfg = {
-
-    // netif is set at runtime once s_usbnetif is created.
-    .netif = NULL,
     .router = USBNET_IP4(192, 168, 7, 1),
     .port = 67,
     // Default to a public DNS; can be overridden later by usb_dev_ethernet_enable_sharing().
@@ -324,7 +321,6 @@ static void usbnet_lwip_init_in_tcpip(void *arg)
     netif_set_link_up(&s_usbnetif);
 
     // Pin the DHCP server to this netif so it always replies via USB.
-    s_dhcp_cfg.netif = &s_usbnetif;
 
     // Start a tiny DHCP server so the host gets an IPv4 address.
     err_t dh_err = dhserv_init(&s_dhcp_cfg);
