@@ -250,6 +250,7 @@ void app_main(void)
     #elif USB_DEV_MODE
     ESP_ERROR_CHECK(usb_dev_bridge_start());
     #elif USB_DEV_ETHERNET_MODE
+    usb_dev_ethernet_set_console_enabled(true);
     ESP_ERROR_CHECK(usb_dev_ethernet_start());
 
 #if USB_DEV_ETHERNET_MODE && ENABLE_LTE_UPSTREAM_PPPOS
