@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdbool.h>
+
 #include "esp_err.h"
 
 #ifdef __cplusplus
@@ -7,6 +9,10 @@ extern "C" {
 #endif
 
 esp_err_t usb_dev_ethernet_start(void);
+
+// Optional CDC-ACM console alongside RNDIS.
+// Must be set before usb_dev_ethernet_start().
+void usb_dev_ethernet_set_console_enabled(bool enabled);
 
 // Enables basic "internet sharing" for the USB-NCM interface:
 // - Updates DHCP options (router + DNS) and restarts the tiny DHCP server
