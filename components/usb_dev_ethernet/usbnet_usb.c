@@ -49,7 +49,9 @@ static const char *TAG = "usb_dev_eth";
 
 static bool s_console_enabled = false;
 
-static struct usbd_interface s_rndis_intf;
+// RNDIS is a 2-interface function (control+data)
+static struct usbd_interface s_rndis_intf0;
+static struct usbd_interface s_rndis_intf1;
 
 static TaskHandle_t s_rx_task = NULL;
 static TaskHandle_t s_evt_task = NULL;
@@ -378,8 +380,11 @@ void usbnet_usb_start(void)
     usbd_desc_register(0, &s_usb_desc);
 #endif
 
-    struct usbd_interface *intf = usbd_rndis_init_intf(&s_rndis_intf, CDC_OUT_EP, CDC_IN_EP, CDC_INT_EP, st->rndis_host_mac);
-    usbd_add_interface(0, intf);
+    // Add interfaces in the exact order they appear in the config descriptor:
+    // - RNDIS: interfaces 0..1
+    // - CDC-ACM console (optional): interfaces 2..3
+    usbd_add_interface(0, usbd_rndis_init_intf(&s_rndis_intf0, CDC_OUT_EP, CDC_IN_EP, CDC_INT_EP, st->rndis_host_mac));
+    usbd_add_interface(0, usbd_rndis_init_intf(&s_rndis_intf1, CDC_OUT_EP, CDC_IN_EP, CDC_INT_EP, st->rndis_host_mac));
 
     if (s_console_enabled)
     {
