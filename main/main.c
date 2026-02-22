@@ -12,6 +12,7 @@
 #include "freertos/semphr.h"
 
 #include "hw_config.h"
+#include "filesystem.h"
 
 // Select exactly one mode (set one to 1, the other to 0)
 #define USB_HOST_MODE        0
@@ -173,6 +174,17 @@ void app_main(void)
             vTaskDelay(pdMS_TO_TICKS(1000));
         }
         
+    }
+
+    filesystem_init();
+
+    FILE *f = fopen(FS_BASE_PATH "/test.txt", "w");
+    if (f) {
+        fprintf(f, "Hello from ESPNetLink!\n");
+        fclose(f);
+        ESP_LOGI(TAG, "Written test.txt");
+    } else {
+        ESP_LOGE(TAG, "Failed to open test.txt");
     }
 
     #if ((USB_HOST_MODE + USB_DEV_MODE + USB_DEV_ETHERNET_MODE) != 1)
