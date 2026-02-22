@@ -58,7 +58,7 @@ dependencies:
     - esp32h4
     version: 0.19.0~2
   espressif/usb_host_cdc_acm:
-    component_hash: 4fc5789ef080e3038d8e09598807000f44d045cff5cc1267d9d4dfe0e4e775fb
+    component_hash: 71f9ae30021b1edb6f42980eb151ab24d0b602b8463861569a151b5254ba1e4b
     dependencies:
     - name: idf
       require: private
@@ -79,7 +79,7 @@ dependencies:
     - esp32p4
     - esp32h4
     - linux
-    version: 2.2.0
+    version: 2.3.0
   espressif/usb_host_ch34x_vcp:
     component_hash: cc6f17936a11aa0ba460e716bd9b70fcd445824bcc7882afbe3ede3513f80c59
     dependencies:
@@ -150,6 +150,16 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 0.2.1
+  joltwallet/littlefs:
+    component_hash: dcea25bcef2de023f089f5f01e8d8c46ad1b8ffef75861ad5ffb4098555839df
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.20.4
 direct_dependencies:
 - cherry-embedded/cherryusb
 - espressif/esp_modem
@@ -160,6 +170,7 @@ direct_dependencies:
 - espressif/usb_host_vcp
 - idf
 - igrr/libnmea
-manifest_hash: 8152a6941973590f2e7c98b53d58896ab5a70e01223f1980e5c64518f7ddde7f
+- joltwallet/littlefs
+manifest_hash: 869fd52870b6dd19b13128a37ff351d2717b2c6f343c9ac684c917fbc92dfd18
 target: esp32s3
 version: 2.0.0
