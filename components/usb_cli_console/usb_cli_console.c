@@ -4,6 +4,7 @@
 
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/unistd.h>
 
@@ -25,6 +26,7 @@
 // RNDIS uses 0x81 IN, 0x02 OUT, 0x83 INT.
 #define USB_CLI_CONSOLE_OUT_EP 0x04
 #define USB_CLI_CONSOLE_IN_EP  0x82
+#define USB_CLI_CONSOLE_INT_EP 0x84
 
 #ifndef USB_CLI_RX_BUF_SIZE
 #define USB_CLI_RX_BUF_SIZE 256
@@ -41,6 +43,7 @@ static volatile bool s_tx_busy = false;
 static volatile bool s_configured = false;
 static volatile bool s_gps_stream_mode = false;
 static volatile bool s_gps_stream_exit_requested = false;
+static volatile bool s_echo_enabled = false;
 
 static portMUX_TYPE s_line_mux = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_tx_mux = portMUX_INITIALIZER_UNLOCKED;
@@ -80,15 +83,49 @@ static int usb_cli_cmd_ver(int argc, char **argv)
     return 0;
 }
 
+static int usb_cli_cmd_echo(int argc, char **argv)
+{
+    if (argc < 2)
+    {
+        printf("echo %d\n", s_echo_enabled ? 1 : 0);
+        return 0;
+    }
+
+    const int v = atoi(argv[1]);
+    if (v == 0)
+    {
+        s_echo_enabled = false;
+        printf("echo 0\n");
+        return 0;
+    }
+    if (v == 1)
+    {
+        s_echo_enabled = true;
+        printf("echo 1\n");
+        return 0;
+    }
+
+    printf("Usage: echo 0|1\n");
+    return 1;
+}
+
 static void usb_cli_register_console_commands(void)
 {
-    const esp_console_cmd_t cmd = {
+    const esp_console_cmd_t cmd_ver = {
         .command = "ver",
         .help = "Print firmware/version info",
         .hint = NULL,
         .func = &usb_cli_cmd_ver,
     };
-    (void)esp_console_cmd_register(&cmd);
+    (void)esp_console_cmd_register(&cmd_ver);
+
+    const esp_console_cmd_t cmd_echo = {
+        .command = "echo",
+        .help = "Enable/disable device-side input echo (0|1)",
+        .hint = NULL,
+        .func = &usb_cli_cmd_echo,
+    };
+    (void)esp_console_cmd_register(&cmd_echo);
 }
 
 static void usb_cli_console_init_esp_console_once(void)
@@ -413,6 +450,13 @@ static void usb_cli_console_task(void *arg)
             continue;
         }
 
+        // If device-side echo is enabled, make sure command output starts on a
+        // fresh line (otherwise it can be appended to the input line).
+        if (s_echo_enabled)
+        {
+            printf("\r\n");
+        }
+
         int ret = 0;
         esp_err_t err = esp_console_run(line, &ret);
         if (err == ESP_ERR_NOT_FOUND)
@@ -535,6 +579,11 @@ static void usb_cli_on_rx_bytes(const uint8_t *data, size_t len)
             if (s_line_len > 0)
             {
                 s_line_len--;
+                if (s_echo_enabled)
+                {
+                    // Echo backspace sequence: move left, erase, move left.
+                    usb_cli_tx_enqueue_from_task("\b \b", 3);
+                }
             }
             continue;
         }
@@ -542,6 +591,11 @@ static void usb_cli_on_rx_bytes(const uint8_t *data, size_t len)
         if (s_line_len < (sizeof(s_line_buf) - 1))
         {
             s_line_buf[s_line_len++] = c;
+            if (s_echo_enabled)
+            {
+                // Echo typed character.
+                usb_cli_tx_enqueue_from_task(&c, 1);
+            }
         }
     }
 }
@@ -598,6 +652,18 @@ static struct usbd_endpoint s_in_ep = {
     .ep_cb = usb_cli_bulk_in,
 };
 
+static void usb_cli_int_in(uint8_t busid, uint8_t ep, uint32_t nbytes)
+{
+    (void)busid;
+    (void)ep;
+    (void)nbytes;
+}
+
+static struct usbd_endpoint s_int_ep = {
+    .ep_addr = USB_CLI_CONSOLE_INT_EP,
+    .ep_cb = usb_cli_int_in,
+};
+
 void usb_cli_console_usb_add(uint8_t busid)
 {
     if (!s_enabled)
@@ -609,6 +675,7 @@ void usb_cli_console_usb_add(uint8_t busid)
 
     usbd_add_interface(busid, usbd_cdc_acm_init_intf(busid, &s_intf0));
     usbd_add_interface(busid, usbd_cdc_acm_init_intf(busid, &s_intf1));
+    usbd_add_endpoint(busid, &s_int_ep);
     usbd_add_endpoint(busid, &s_out_ep);
     usbd_add_endpoint(busid, &s_in_ep);
 
