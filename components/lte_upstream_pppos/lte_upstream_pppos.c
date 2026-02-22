@@ -22,8 +22,9 @@
 static const char *TAG = "lte_pppos";
 
 static EventGroupHandle_t s_evt;
-static const EventBits_t BIT_CONNECTED = BIT0;
-static const EventBits_t BIT_DISCONNECTED = BIT1;
+static const EventBits_t BIT_CONNECTED        = BIT0;
+static const EventBits_t BIT_DISCONNECTED     = BIT1;
+static const EventBits_t BIT_NETWORK_DETACHED = BIT2;
 
 #if CONFIG_PPP_SUPPORT
 #include "esp_modem_api.h"
@@ -36,6 +37,16 @@ static TaskHandle_t s_monitor_task;
 
 static portMUX_TYPE s_status_mux = portMUX_INITIALIZER_UNLOCKED;
 static lte_status_t s_status;   /* protected by s_status_mux */
+
+/* --- reconnect supervisor --- */
+static TaskHandle_t s_supervisor_task = NULL;
+static volatile bool s_supervisor_running = false;
+
+/* Deep-copied config strings for use on reconnect */
+static lte_upstream_pppos_config_t s_saved_cfg;
+static char s_saved_apn[64];
+static char s_saved_user[32];
+static char s_saved_pass[32];
 
 static void on_ppp_changed(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
@@ -149,6 +160,10 @@ static void on_ip_event(void *arg, esp_event_base_t event_base, int32_t event_id
             ESP_LOGI(TAG, "DNS2    : " IPSTR, IP2STR(&dns_info.ip.u_addr.ip4));
         }
 
+        portENTER_CRITICAL(&s_status_mux);
+        s_status.current_ip = event->ip_info.ip;
+        portEXIT_CRITICAL(&s_status_mux);
+
         if (s_enable_usb_share)
         {
             esp_err_t share_err = usb_dev_ethernet_enable_sharing(dns_main_addr);
@@ -160,14 +175,19 @@ static void on_ip_event(void *arg, esp_event_base_t event_base, int32_t event_id
 
         if (s_evt)
         {
+            xEventGroupClearBits(s_evt, BIT_DISCONNECTED);
             xEventGroupSetBits(s_evt, BIT_CONNECTED);
         }
     }
     else if (event_id == IP_EVENT_PPP_LOST_IP)
     {
         ESP_LOGW(TAG, "PPP LOST IP");
+        portENTER_CRITICAL(&s_status_mux);
+        s_status.current_ip.addr = 0;
+        portEXIT_CRITICAL(&s_status_mux);
         if (s_evt)
         {
+            xEventGroupClearBits(s_evt, BIT_CONNECTED);
             xEventGroupSetBits(s_evt, BIT_DISCONNECTED);
         }
     }
@@ -239,6 +259,13 @@ static void lte_monitor_task(void *arg)
         if (esp_modem_get_network_attachment_state(s_dce, &attached) == ESP_OK)
         {
             ESP_LOGI(TAG_MON, "Network: %s", attached ? "attached" : "detached");
+            if (s_evt)
+            {
+                if (attached == 1)
+                    xEventGroupClearBits(s_evt, BIT_NETWORK_DETACHED);
+                else
+                    xEventGroupSetBits(s_evt, BIT_NETWORK_DETACHED);
+            }
         }
 
         bool ppp_up = false;
@@ -275,19 +302,228 @@ static void lte_monitor_task(void *arg)
     s_monitor_task = NULL;
     vTaskDelete(NULL);
 }
-#endif // CONFIG_PPP_SUPPORT
 
-esp_err_t lte_upstream_pppos_start(const lte_upstream_pppos_config_t *cfg)
+/* -----------------------------------------------------------------------
+ * lte_save_config – deep-copy caller's config so we can reconnect later.
+ * ----------------------------------------------------------------------- */
+static void lte_save_config(const lte_upstream_pppos_config_t *cfg)
 {
-    if (cfg == NULL || cfg->apn == NULL)
+    s_saved_cfg = *cfg;
+    s_saved_apn[0] = s_saved_user[0] = s_saved_pass[0] = '\0';
+
+    if (cfg->apn)
     {
-        return ESP_ERR_INVALID_ARG;
+        strncpy(s_saved_apn, cfg->apn, sizeof(s_saved_apn) - 1);
+        s_saved_cfg.apn = s_saved_apn;
+    }
+    if (cfg->user)
+    {
+        strncpy(s_saved_user, cfg->user, sizeof(s_saved_user) - 1);
+        s_saved_cfg.user = s_saved_user;
+    }
+    if (cfg->pass)
+    {
+        strncpy(s_saved_pass, cfg->pass, sizeof(s_saved_pass) - 1);
+        s_saved_cfg.pass = s_saved_pass;
+    }
+    /* Supervisor manages its own reconnect timing; disable blocking wait. */
+    s_saved_cfg.connect_timeout_ms = 0;
+}
+
+/* -----------------------------------------------------------------------
+ * lte_inner_stop – tears down DCE / netif / event-group.
+ * Does NOT touch s_supervisor_task / s_supervisor_running.
+ * ----------------------------------------------------------------------- */
+static void lte_inner_stop(void)
+{
+    s_enable_usb_share = false;
+
+    s_monitor_running = false;
+    for (int i = 0; i < 20 && s_monitor_task != NULL; i++)
+    {
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    if (s_monitor_task != NULL)
+    {
+        vTaskDelete(s_monitor_task);
+        s_monitor_task = NULL;
     }
 
-#if !CONFIG_PPP_SUPPORT
-    (void)cfg;
-    return ESP_ERR_NOT_SUPPORTED;
-#else
+    if (s_dce)
+    {
+        esp_modem_destroy(s_dce);
+        s_dce = NULL;
+    }
+    if (s_netif_ppp)
+    {
+        esp_netif_destroy(s_netif_ppp);
+        s_netif_ppp = NULL;
+    }
+
+    unregister_handlers();
+
+    if (s_evt)
+    {
+        vEventGroupDelete(s_evt);
+        s_evt = NULL;
+    }
+
+    portENTER_CRITICAL(&s_status_mux);
+    s_status = (lte_status_t){0};
+    portEXIT_CRITICAL(&s_status_mux);
+}
+
+/* Forward declaration – lte_supervisor_task calls lte_inner_start. */
+static esp_err_t lte_inner_start(const lte_upstream_pppos_config_t *cfg);
+
+/* -----------------------------------------------------------------------
+ * lte_supervisor_task – watches for PPP failure and drives reconnect.
+ *
+ * Triggers (all require status.valid):
+ *  1. BIT_DISCONNECTED set         → act immediately (skip patience window)
+ *  2. ppp_connected=false          → 5 consecutive polls (~75 s) then reconnect
+ *  3. ppp_connected=true but
+ *     attached=false               → 5 consecutive polls (~75 s) then reconnect
+ *     (stale PPP session: network dropped but no IP-lost event yet)
+ *
+ * Backoff: 5 s → 10 s → 20 s → 40 s → 60 s (max), reset on full health.
+ * ----------------------------------------------------------------------- */
+static void lte_supervisor_task(void *arg)
+{
+    (void)arg;
+    static const char *TAG_SUP = "lte_sup";
+
+    int      consecutive_down     = 0;
+    int      consecutive_detached = 0;
+    unsigned backoff_ms           = 5000;
+    const unsigned BACKOFF_MAX    = 60000;
+
+    while (s_supervisor_running)
+    {
+        /* Sleep 15 s in 100 ms chunks – same pattern as lte_monitor_task.
+         * Using vTaskDelay in small increments ensures the IDLE task runs
+         * and feeds the task watchdog, unlike a single long xEventGroupWaitBits. */
+        EventBits_t bits = 0;
+        for (int i = 0; i < 150 && s_supervisor_running; i++)
+        {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            /* Wake early if BIT_DISCONNECTED is already set */
+            if (s_evt && (xEventGroupGetBits(s_evt) & BIT_DISCONNECTED))
+            {
+                bits = BIT_DISCONNECTED;
+                break;
+            }
+        }
+
+        if (!s_supervisor_running)
+        {
+            break;
+        }
+
+        const bool explicit_disconnect = (bits & BIT_DISCONNECTED) != 0;
+
+        portENTER_CRITICAL(&s_status_mux);
+        const bool ppp_up  = s_status.ppp_connected;
+        const bool valid   = s_status.valid;
+        const bool net_ok  = s_status.attached;
+        portEXIT_CRITICAL(&s_status_mux);
+
+        if (valid && ppp_up && net_ok)
+        {
+            /* Truly healthy – reset all counters */
+            consecutive_down     = 0;
+            consecutive_detached = 0;
+            backoff_ms = 5000;
+            continue;
+        }
+
+        bool do_reconnect = false;
+
+        if (explicit_disconnect)
+        {
+            /* Explicit IP-lost event – act immediately */
+            ESP_LOGW(TAG_SUP, "BIT_DISCONNECTED received");
+            consecutive_down     = 0;
+            consecutive_detached = 0;
+            do_reconnect = true;
+        }
+        else if (valid && !ppp_up)
+        {
+            consecutive_detached = 0;
+            consecutive_down++;
+            ESP_LOGD(TAG_SUP, "PPP down poll %d/5", consecutive_down);
+            if (consecutive_down >= 5)
+            {
+                consecutive_down = 0;
+                do_reconnect = true;
+            }
+        }
+        else if (valid && ppp_up && !net_ok)
+        {
+            /* PPP appears up but network is detached – stale session */
+            consecutive_down = 0;
+            consecutive_detached++;
+            ESP_LOGW(TAG_SUP, "Network detached while PPP up (%d/5 polls)",
+                     consecutive_detached);
+            if (consecutive_detached >= 5)
+            {
+                consecutive_detached = 0;
+                do_reconnect = true;
+            }
+        }
+        else
+        {
+            /* Status not valid yet – stack is still starting up */
+            continue;
+        }
+
+        if (!do_reconnect)
+        {
+            continue;
+        }
+
+        ESP_LOGW(TAG_SUP, "PPP connection lost – reconnecting in %u ms", backoff_ms);
+
+        for (unsigned w = 0; w < backoff_ms && s_supervisor_running; w += 500)
+        {
+            vTaskDelay(pdMS_TO_TICKS(500));
+        }
+
+        if (!s_supervisor_running)
+        {
+            break;
+        }
+
+        ESP_LOGI(TAG_SUP, "Tearing down LTE stack...");
+        lte_inner_stop();
+
+        ESP_LOGI(TAG_SUP, "Restarting LTE stack...");
+        esp_err_t err = lte_inner_start(&s_saved_cfg);
+        if (err == ESP_OK)
+        {
+            ESP_LOGI(TAG_SUP, "LTE stack restarted – waiting for IP");
+            backoff_ms = 5000;
+        }
+        else
+        {
+            unsigned next = (backoff_ms * 2 > BACKOFF_MAX) ? BACKOFF_MAX : backoff_ms * 2;
+            ESP_LOGE(TAG_SUP, "LTE restart failed: %s – next retry in %u ms",
+                     esp_err_to_name(err), next);
+            backoff_ms = next;
+        }
+    }
+
+    s_supervisor_task = NULL;
+    vTaskDelete(NULL);
+}
+
+/* -----------------------------------------------------------------------
+ * lte_inner_start – sets up DCE / netif / event-group.
+ * Does NOT touch s_supervisor_task / s_supervisor_running.
+ * Error paths call lte_inner_stop() for clean self-rollback.
+ * ----------------------------------------------------------------------- */
+static esp_err_t lte_inner_start(const lte_upstream_pppos_config_t *cfg)
+{
     if (s_dce || s_netif_ppp)
     {
         return ESP_ERR_INVALID_STATE;
@@ -334,11 +570,13 @@ esp_err_t lte_upstream_pppos_start(const lte_upstream_pppos_config_t *cfg)
         }
     }
 
-    xEventGroupClearBits(s_evt, BIT_CONNECTED | BIT_DISCONNECTED);
+    xEventGroupClearBits(s_evt, BIT_CONNECTED | BIT_DISCONNECTED | BIT_NETWORK_DETACHED);
 
     err = register_handlers();
     if (err != ESP_OK)
     {
+        vEventGroupDelete(s_evt);
+        s_evt = NULL;
         return err;
     }
 
@@ -347,6 +585,8 @@ esp_err_t lte_upstream_pppos_start(const lte_upstream_pppos_config_t *cfg)
     if (!s_netif_ppp)
     {
         unregister_handlers();
+        vEventGroupDelete(s_evt);
+        s_evt = NULL;
         return ESP_ERR_NO_MEM;
     }
 
@@ -364,20 +604,21 @@ esp_err_t lte_upstream_pppos_start(const lte_upstream_pppos_config_t *cfg)
 #if CONFIG_LWIP_PPP_PAP_SUPPORT
         (void)esp_netif_ppp_set_auth(s_netif_ppp, NETIF_PPP_AUTHTYPE_PAP, cfg->user, cfg->pass);
 #else
-        ESP_LOGW(TAG, "PPP user/pass provided but PAP support is disabled (CONFIG_LWIP_PPP_PAP_SUPPORT=n). Skipping auth.");
+        ESP_LOGW(TAG, "PPP user/pass provided but PAP support is disabled. Skipping auth.");
 #endif
     }
 
     esp_modem_dce_config_t dce_config = ESP_MODEM_DCE_DEFAULT_CONFIG(cfg->apn);
     esp_modem_dte_config_t dte_config = ESP_MODEM_DTE_DEFAULT_CONFIG();
 
-    dte_config.uart_config.port_num = cfg->modem.uart_port;
-    dte_config.uart_config.tx_io_num = cfg->modem.tx_pin;
-    dte_config.uart_config.rx_io_num = cfg->modem.rx_pin;
+    dte_config.uart_config.port_num   = cfg->modem.uart_port;
+    dte_config.uart_config.tx_io_num  = cfg->modem.tx_pin;
+    dte_config.uart_config.rx_io_num  = cfg->modem.rx_pin;
     dte_config.uart_config.rts_io_num = cfg->modem.rts_pin;
     dte_config.uart_config.cts_io_num = cfg->modem.cts_pin;
 
-    dte_config.uart_config.flow_control = cfg->hw_flow_control ? ESP_MODEM_FLOW_CONTROL_HW : ESP_MODEM_FLOW_CONTROL_NONE;
+    dte_config.uart_config.flow_control = cfg->hw_flow_control
+        ? ESP_MODEM_FLOW_CONTROL_HW : ESP_MODEM_FLOW_CONTROL_NONE;
 
     if (cfg->baud_rate > 0)
     {
@@ -388,9 +629,7 @@ esp_err_t lte_upstream_pppos_start(const lte_upstream_pppos_config_t *cfg)
     if (!s_dce)
     {
         ESP_LOGE(TAG, "esp_modem_new returned NULL");
-        esp_netif_destroy(s_netif_ppp);
-        s_netif_ppp = NULL;
-        unregister_handlers();
+        lte_inner_stop();
         return ESP_FAIL;
     }
 
@@ -399,12 +638,11 @@ esp_err_t lte_upstream_pppos_start(const lte_upstream_pppos_config_t *cfg)
         (void)esp_modem_set_flow_control(s_dce, 2, 2);
     }
 
-    // Wait for network attach before starting PPP (otherwise most carriers drop immediately).
     err = wait_for_cellular_attach(s_dce, 60000);
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "Cellular not attached: %s", esp_err_to_name(err));
-        (void)lte_upstream_pppos_stop();
+        lte_inner_stop();
         return err;
     }
 
@@ -412,7 +650,7 @@ esp_err_t lte_upstream_pppos_start(const lte_upstream_pppos_config_t *cfg)
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "esp_modem_set_mode(CMUX) failed: %s", esp_err_to_name(err));
-        (void)lte_upstream_pppos_stop();
+        lte_inner_stop();
         return err;
     }
 
@@ -434,6 +672,42 @@ esp_err_t lte_upstream_pppos_start(const lte_upstream_pppos_config_t *cfg)
         {
             return err;
         }
+    }
+
+    return ESP_OK;
+}
+
+#endif // CONFIG_PPP_SUPPORT
+
+esp_err_t lte_upstream_pppos_start(const lte_upstream_pppos_config_t *cfg)
+{
+    if (cfg == NULL || cfg->apn == NULL)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+#if !CONFIG_PPP_SUPPORT
+    (void)cfg;
+    return ESP_ERR_NOT_SUPPORTED;
+#else
+    if (s_dce || s_netif_ppp || s_supervisor_task)
+    {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    lte_save_config(cfg);
+
+    esp_err_t err = lte_inner_start(cfg);
+    if (err != ESP_OK)
+    {
+        return err;
+    }
+
+    s_supervisor_running = true;
+    if (xTaskCreate(lte_supervisor_task, "lte_sup", 8192, NULL, 4, &s_supervisor_task) != pdPASS)
+    {
+        ESP_LOGW(TAG, "Failed to create lte_supervisor task – no auto-reconnect");
+        s_supervisor_task = NULL;
     }
 
     return ESP_OK;
@@ -476,44 +750,19 @@ esp_err_t lte_upstream_pppos_stop(void)
 #if !CONFIG_PPP_SUPPORT
     return ESP_ERR_NOT_SUPPORTED;
 #else
-    s_enable_usb_share = false;
-
-    /* Stop monitor task before destroying DCE */
-    s_monitor_running = false;
-    for (int i = 0; i < 20 && s_monitor_task != NULL; i++)
+    /* Signal supervisor to exit and wait up to 4 s before force-killing */
+    s_supervisor_running = false;
+    for (int i = 0; i < 40 && s_supervisor_task != NULL; i++)
     {
         vTaskDelay(pdMS_TO_TICKS(100));
     }
-    if (s_monitor_task != NULL)
+    if (s_supervisor_task != NULL)
     {
-        vTaskDelete(s_monitor_task);
-        s_monitor_task = NULL;
+        vTaskDelete(s_supervisor_task);
+        s_supervisor_task = NULL;
     }
 
-    if (s_dce)
-    {
-        esp_modem_destroy(s_dce);
-        s_dce = NULL;
-    }
-
-    if (s_netif_ppp)
-    {
-        esp_netif_destroy(s_netif_ppp);
-        s_netif_ppp = NULL;
-    }
-
-    unregister_handlers();
-
-    if (s_evt)
-    {
-        vEventGroupDelete(s_evt);
-        s_evt = NULL;
-    }
-
-    portENTER_CRITICAL(&s_status_mux);
-    s_status = (lte_status_t){0};
-    portEXIT_CRITICAL(&s_status_mux);
-
+    lte_inner_stop();
     return ESP_OK;
 #endif
 }
@@ -541,12 +790,15 @@ static int cmd_lte(int argc, char **argv)
 {
     if (argc < 2)
     {
-        printf("Usage: lte -s | -r | -n\n");
+        printf("Usage: lte -s | -r | -n | -i\n");
         printf("  -s  full status\n");
         printf("  -r  signal quality (RSSI/BER)\n");
         printf("  -n  network attachment\n");
+        printf("  -i  current IP address\n");
         return 0;
     }
+
+    const char *flag = argv[1];
 
     lte_status_t st = {0};
     esp_err_t err = lte_upstream_pppos_get_status(&st);
@@ -556,13 +808,36 @@ static int cmd_lte(int argc, char **argv)
         printf("LTE: PPP support not compiled in\n");
         return 1;
     }
+
+    /* -i works before the monitor has run; uses event bits directly */
+    if (strcmp(flag, "-i") == 0)
+    {
+        if (!s_evt)
+        {
+            printf("No IP (LTE not started)\n");
+            return 0;
+        }
+        EventBits_t bits = xEventGroupGetBits(s_evt);
+        if ((bits & BIT_CONNECTED) && !(bits & BIT_DISCONNECTED))
+        {
+            printf("IP: " IPSTR "\n", IP2STR(&st.current_ip));
+        }
+        else
+        {
+            const char *reason =
+                (bits & BIT_NETWORK_DETACHED) ? "network detached" :
+                (bits & BIT_DISCONNECTED)     ? "PPP disconnected" :
+                                                "connecting";
+            printf("No IP (%s)\n", reason);
+        }
+        return 0;
+    }
+
     if (err == ESP_ERR_INVALID_STATE || !st.valid)
     {
         printf("LTE: no data yet (monitor task not started or first poll pending)\n");
         return 1;
     }
-
-    const char *flag = argv[1];
 
     if (strcmp(flag, "-r") == 0)
     {
@@ -626,8 +901,8 @@ void lte_upstream_pppos_console_register(void)
 
     const esp_console_cmd_t cmd = {
         .command = "lte",
-        .help    = "LTE modem status. Flags: -s full status, -r signal/RSSI, -n network attachment",
-        .hint    = "-s|-r|-n",
+        .help    = "LTE modem status. Flags: -s full status, -r signal/RSSI, -n network attachment, -i IP address",
+        .hint    = "-s|-r|-n|-i",
         .func    = &cmd_lte,
     };
     (void)esp_console_cmd_register(&cmd);

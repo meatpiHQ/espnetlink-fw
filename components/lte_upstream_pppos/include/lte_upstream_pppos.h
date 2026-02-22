@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "esp_netif.h"
 
 #include "modem_manager.h"
 
@@ -38,6 +39,7 @@ typedef struct {
     int   ber;               // bit-error-rate class (0-7, 99=unknown)
     bool  attached;          // network attachment state (CEREG/CREG)
     bool  ppp_connected;     // true after IP_EVENT_PPP_GOT_IP, false after LOST_IP
+    esp_ip4_addr_t current_ip; // last IP assigned by PPP; zeroed when lost
     char  operator_name[64]; // operator name from AT+COPS (empty until first query)
     int   operator_act;      // access technology (7=LTE, 2=UTRAN, etc.)
 } lte_status_t;
