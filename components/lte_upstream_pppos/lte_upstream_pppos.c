@@ -4,7 +4,10 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/task.h"
+#include "freertos/portmacro.h"
 
+#include "esp_console.h"
 #include "esp_err.h"
 #include "esp_event.h"
 #include "esp_log.h"
@@ -28,6 +31,11 @@ static const EventBits_t BIT_DISCONNECTED = BIT1;
 static esp_modem_dce_t *s_dce;
 static esp_netif_t *s_netif_ppp;
 static bool s_enable_usb_share;
+static volatile bool s_monitor_running;
+static TaskHandle_t s_monitor_task;
+
+static portMUX_TYPE s_status_mux = portMUX_INITIALIZER_UNLOCKED;
+static lte_status_t s_status;   /* protected by s_status_mux */
 
 static void on_ppp_changed(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
@@ -190,6 +198,83 @@ static void unregister_handlers(void)
     (void)esp_event_handler_unregister(IP_EVENT, ESP_EVENT_ANY_ID, &on_ip_event);
     (void)esp_event_handler_unregister(NETIF_PPP_STATUS, ESP_EVENT_ANY_ID, &on_ppp_changed);
 }
+
+static void lte_monitor_task(void *arg)
+{
+    (void)arg;
+    static const char *TAG_MON = "lte_monitor";
+    char op_name[64] = {0};
+    int op_act = 0;
+    uint32_t poll_count = 0;
+
+    while (s_monitor_running)
+    {
+        /* Sleep 15 s in 100 ms chunks so stop() can interrupt quickly */
+        for (int i = 0; i < 150 && s_monitor_running; i++)
+        {
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+
+        if (!s_monitor_running || !s_dce)
+        {
+            break;
+        }
+
+        poll_count++;
+
+        /* --- Gather metrics --- */
+
+        int rssi = 99, ber = 99;
+        if (esp_modem_get_signal_quality(s_dce, &rssi, &ber) == ESP_OK)
+        {
+            int rssi_dbm = (rssi < 99) ? (rssi * 2 - 113) : 0;
+            ESP_LOGI(TAG_MON, "Signal: RSSI=%d (%d dBm), BER=%d", rssi, rssi_dbm, ber);
+        }
+        else
+        {
+            ESP_LOGW(TAG_MON, "Signal quality query failed");
+        }
+
+        int attached = 0;
+        if (esp_modem_get_network_attachment_state(s_dce, &attached) == ESP_OK)
+        {
+            ESP_LOGI(TAG_MON, "Network: %s", attached ? "attached" : "detached");
+        }
+
+        bool ppp_up = false;
+        if (s_evt)
+        {
+            EventBits_t bits = xEventGroupGetBits(s_evt);
+            ppp_up = (bits & BIT_CONNECTED) && !(bits & BIT_DISCONNECTED);
+            ESP_LOGI(TAG_MON, "PPP: %s", ppp_up ? "connected" : "disconnected");
+        }
+
+        /* Operator name – query every 4th poll (~60 s) */
+        if (poll_count % 4 == 1)
+        {
+            if (esp_modem_get_operator_name(s_dce, op_name, &op_act) == ESP_OK)
+            {
+                ESP_LOGI(TAG_MON, "Operator: \"%s\" (act=%d)", op_name, op_act);
+            }
+        }
+
+        /* --- Commit to shared status struct --- */
+        portENTER_CRITICAL(&s_status_mux);
+        s_status.valid         = true;
+        s_status.rssi          = rssi;
+        s_status.rssi_dbm      = (rssi < 99) ? (rssi * 2 - 113) : 0;
+        s_status.ber           = ber;
+        s_status.attached      = (attached == 1);
+        s_status.ppp_connected = ppp_up;
+        s_status.operator_act  = op_act;
+        /* op_name only changes every 4 polls; copy it every time (cheap) */
+        memcpy(s_status.operator_name, op_name, sizeof(s_status.operator_name));
+        portEXIT_CRITICAL(&s_status_mux);
+    }
+
+    s_monitor_task = NULL;
+    vTaskDelete(NULL);
+}
 #endif // CONFIG_PPP_SUPPORT
 
 esp_err_t lte_upstream_pppos_start(const lte_upstream_pppos_config_t *cfg)
@@ -323,12 +408,21 @@ esp_err_t lte_upstream_pppos_start(const lte_upstream_pppos_config_t *cfg)
         return err;
     }
 
-    err = esp_modem_set_mode(s_dce, ESP_MODEM_MODE_DATA);
+    err = esp_modem_set_mode(s_dce, ESP_MODEM_MODE_CMUX);
     if (err != ESP_OK)
     {
-        ESP_LOGE(TAG, "esp_modem_set_mode(DATA) failed: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "esp_modem_set_mode(CMUX) failed: %s", esp_err_to_name(err));
         (void)lte_upstream_pppos_stop();
         return err;
+    }
+
+    ESP_LOGI(TAG, "CMUX mode active – PPP on data channel, AT commands on control channel");
+
+    s_monitor_running = true;
+    if (xTaskCreate(lte_monitor_task, "lte_monitor", 4096, NULL, 4, &s_monitor_task) != pdPASS)
+    {
+        ESP_LOGW(TAG, "Failed to create lte_monitor task");
+        s_monitor_task = NULL;
     }
 
     ESP_LOGI(TAG, "PPPoS dial started (waiting for IP events)...");
@@ -384,6 +478,18 @@ esp_err_t lte_upstream_pppos_stop(void)
 #else
     s_enable_usb_share = false;
 
+    /* Stop monitor task before destroying DCE */
+    s_monitor_running = false;
+    for (int i = 0; i < 20 && s_monitor_task != NULL; i++)
+    {
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    if (s_monitor_task != NULL)
+    {
+        vTaskDelete(s_monitor_task);
+        s_monitor_task = NULL;
+    }
+
     if (s_dce)
     {
         esp_modem_destroy(s_dce);
@@ -404,6 +510,125 @@ esp_err_t lte_upstream_pppos_stop(void)
         s_evt = NULL;
     }
 
+    portENTER_CRITICAL(&s_status_mux);
+    s_status = (lte_status_t){0};
+    portEXIT_CRITICAL(&s_status_mux);
+
     return ESP_OK;
 #endif
+}
+
+esp_err_t lte_upstream_pppos_get_status(lte_status_t *out)
+{
+    if (!out)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+#if !CONFIG_PPP_SUPPORT
+    return ESP_ERR_NOT_SUPPORTED;
+#else
+    portENTER_CRITICAL(&s_status_mux);
+    *out = s_status;
+    bool valid = s_status.valid;
+    portEXIT_CRITICAL(&s_status_mux);
+
+    return valid ? ESP_OK : ESP_ERR_INVALID_STATE;
+#endif
+}
+
+static int cmd_lte(int argc, char **argv)
+{
+    if (argc < 2)
+    {
+        printf("Usage: lte -s | -r | -n\n");
+        printf("  -s  full status\n");
+        printf("  -r  signal quality (RSSI/BER)\n");
+        printf("  -n  network attachment\n");
+        return 0;
+    }
+
+    lte_status_t st = {0};
+    esp_err_t err = lte_upstream_pppos_get_status(&st);
+
+    if (err == ESP_ERR_NOT_SUPPORTED)
+    {
+        printf("LTE: PPP support not compiled in\n");
+        return 1;
+    }
+    if (err == ESP_ERR_INVALID_STATE || !st.valid)
+    {
+        printf("LTE: no data yet (monitor task not started or first poll pending)\n");
+        return 1;
+    }
+
+    const char *flag = argv[1];
+
+    if (strcmp(flag, "-r") == 0)
+    {
+        if (st.rssi == 99)
+        {
+            printf("RSSI: unknown\n");
+        }
+        else
+        {
+            printf("RSSI: %d (%d dBm), BER: %d\n", st.rssi, st.rssi_dbm, st.ber);
+        }
+        return 0;
+    }
+
+    if (strcmp(flag, "-n") == 0)
+    {
+        printf("Network: %s\n", st.attached ? "attached" : "detached");
+        return 0;
+    }
+
+    if (strcmp(flag, "-s") == 0)
+    {
+        printf("--- LTE Status ---\n");
+
+        if (st.rssi == 99)
+        {
+            printf("  Signal   : unknown\n");
+        }
+        else
+        {
+            printf("  Signal   : RSSI=%d (%d dBm)  BER=%d\n", st.rssi, st.rssi_dbm, st.ber);
+        }
+
+        printf("  Network  : %s\n", st.attached ? "attached" : "detached");
+        printf("  PPP      : %s\n", st.ppp_connected ? "connected" : "disconnected");
+
+        if (st.operator_name[0] != '\0')
+        {
+            printf("  Operator : %s  (act=%d)\n", st.operator_name, st.operator_act);
+        }
+        else
+        {
+            printf("  Operator : (not yet queried)\n");
+        }
+
+        return 0;
+    }
+
+    printf("lte: unknown flag '%s'. Use -s, -r, or -n\n", flag);
+    return 1;
+}
+
+void lte_upstream_pppos_console_register(void)
+{
+    static bool registered = false;
+    if (registered)
+    {
+        return;
+    }
+    registered = true;
+
+    const esp_console_cmd_t cmd = {
+        .command = "lte",
+        .help    = "LTE modem status. Flags: -s full status, -r signal/RSSI, -n network attachment",
+        .hint    = "-s|-r|-n",
+        .func    = &cmd_lte,
+    };
+    (void)esp_console_cmd_register(&cmd);
 }

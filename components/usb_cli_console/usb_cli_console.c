@@ -14,6 +14,7 @@
 #include "esp_vfs.h"
 
 #include "gps.h"
+#include "lte_upstream_pppos.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -147,6 +148,7 @@ static void usb_cli_console_init_esp_console_once(void)
     esp_console_register_help_command();
     usb_cli_register_console_commands();
     gps_console_register();
+    lte_upstream_pppos_console_register();
 
     s_esp_console_inited = true;
 }
