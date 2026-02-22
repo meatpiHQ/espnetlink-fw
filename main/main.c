@@ -13,6 +13,7 @@
 
 #include "hw_config.h"
 #include "filesystem.h"
+#include "config_manager.h"
 
 // Select exactly one mode (set one to 1, the other to 0)
 #define USB_HOST_MODE        0
@@ -178,14 +179,7 @@ void app_main(void)
 
     filesystem_init();
 
-    FILE *f = fopen(FS_BASE_PATH "/test.txt", "w");
-    if (f) {
-        fprintf(f, "Hello from ESPNetLink!\n");
-        fclose(f);
-        ESP_LOGI(TAG, "Written test.txt");
-    } else {
-        ESP_LOGE(TAG, "Failed to open test.txt");
-    }
+    config_manager_init();
 
     #if ((USB_HOST_MODE + USB_DEV_MODE + USB_DEV_ETHERNET_MODE) != 1)
     #error "Select exactly one of USB_HOST_MODE, USB_DEV_MODE, USB_DEV_ETHERNET_MODE"
