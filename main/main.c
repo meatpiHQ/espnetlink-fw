@@ -77,7 +77,7 @@ static void lte_upstream_task(void *arg)
         .baud_rate = 3000000,
         .hw_flow_control = true,
 
-        .enable_usb_ncm_sharing = true,
+        .enable_usb_ncm_sharing = false,
         .connect_timeout_ms = 0,
     };
 
@@ -161,6 +161,20 @@ static void iface_tx_task(void *arg)
 
 void app_main(void)
 {
+	gpio_reset_pin(USB_SEL_1);
+	gpio_set_direction(USB_SEL_1, GPIO_MODE_INPUT);
+	gpio_set_pull_mode(USB_SEL_1, GPIO_FLOATING);
+
+    if(gpio_get_level(USB_SEL_1) == 0)
+    {
+        ESP_LOGI(TAG, "USB_SEL_1 is LOW: entering flash mode");
+        while (gpio_get_level(USB_SEL_1) == 0)
+        {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+        
+    }
+
     #if ((USB_HOST_MODE + USB_DEV_MODE + USB_DEV_ETHERNET_MODE) != 1)
     #error "Select exactly one of USB_HOST_MODE, USB_DEV_MODE, USB_DEV_ETHERNET_MODE"
     #elif USB_HOST_MODE

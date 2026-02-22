@@ -5,7 +5,9 @@
 #include "driver/uart.h"
 
 // GPIO Pin Definitions
-#define LED_GPIO                GPIO_NUM_2
+#define LED_GPIO               GPIO_NUM_2
+#define USB_SEL_1              GPIO_NUM_12
+#define USB_SEL_2              GPIO_NUM_10
 
 // GPS
 #define GPS_UART_PORT          UART_NUM_2
