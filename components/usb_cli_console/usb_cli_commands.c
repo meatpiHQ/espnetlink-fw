@@ -2,10 +2,13 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
+#include "esp_chip_info.h"
 #include "esp_console.h"
 #include "esp_idf_version.h"
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_system.h"
 
 // ---------------------------------------------------------------------------
@@ -34,6 +37,7 @@ static int usb_cli_cmd_ver(int argc, char **argv)
     (void)argv;
 
     printf("ESPNetLink USB CLI (CDC-ACM)\n");
+    printf("FW %s\n", GIT_SHA);
     printf("ESP-IDF %s\n", esp_get_idf_version());
     return 0;
 }
@@ -92,6 +96,53 @@ static int usb_cli_cmd_debug(int argc, char **argv)
     return 1;
 }
 
+static int usb_cli_cmd_system(int argc, char **argv)
+{
+    if (argc < 2)
+    {
+        printf("Usage: system -v | -i\n");
+        return 1;
+    }
+
+    if (strcmp(argv[1], "-v") == 0)
+    {
+        printf("espnetlink-fw_" GIT_SHA "\n");
+        return 0;
+    }
+
+    if (strcmp(argv[1], "-i") == 0)
+    {
+        esp_chip_info_t chip;
+        esp_chip_info(&chip);
+
+        const char *model_str;
+        switch (chip.model)
+        {
+            case CHIP_ESP32S3: model_str = "ESP32-S3"; break;
+            case CHIP_ESP32S2: model_str = "ESP32-S2"; break;
+            case CHIP_ESP32C3: model_str = "ESP32-C3"; break;
+            case CHIP_ESP32:   model_str = "ESP32";    break;
+            default:           model_str = "Unknown";  break;
+        }
+
+        uint8_t mac[6];
+        esp_read_mac(mac, ESP_MAC_WIFI_STA);
+
+        printf("FW version   : espnetlink-fw_" GIT_SHA "\n");
+        printf("ESP-IDF      : %s\n", esp_get_idf_version());
+        printf("Chip model   : %s rev %d\n", model_str, chip.revision);
+        printf("CPU cores    : %d\n", chip.cores);
+        printf("Free heap    : %lu bytes\n", (unsigned long)esp_get_free_heap_size());
+        printf("Min free heap: %lu bytes\n", (unsigned long)esp_get_minimum_free_heap_size());
+        printf("MAC (STA)    : %02X:%02X:%02X:%02X:%02X:%02X\n",
+               mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        return 0;
+    }
+
+    printf("Usage: system -v | -i\n");
+    return 1;
+}
+
 static int usb_cli_cmd_reboot(int argc, char **argv)
 {
     (void)argc;
@@ -131,6 +182,14 @@ void usb_cli_register_console_commands(void)
         .func    = &usb_cli_cmd_debug,
     };
     (void)esp_console_cmd_register(&cmd_debug);
+
+    const esp_console_cmd_t cmd_system = {
+        .command = "system",
+        .help    = "System info: -v (version), -i (device info)",
+        .hint    = "-v | -i",
+        .func    = &usb_cli_cmd_system,
+    };
+    (void)esp_console_cmd_register(&cmd_system);
 
     const esp_console_cmd_t cmd_reboot = {
         .command = "reboot",
