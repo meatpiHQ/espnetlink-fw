@@ -11,12 +11,13 @@
 #include "esp_console.h"
 #include "esp_err.h"
 #include "esp_idf_version.h"
-#include "esp_log.h"
 #include "esp_vfs.h"
 
 #include "gps.h"
 #include "lte_upstream_pppos.h"
 #include "config_manager.h"
+
+#include "usb_cli_commands.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -41,8 +42,6 @@
 
 #define USB_CLI_PROMPT "esp> "
 
-static bool s_debug_enabled = false;
-
 static bool s_enabled = false;
 static TaskHandle_t s_task = NULL;
 static volatile bool s_dtr = false;
@@ -50,7 +49,6 @@ static volatile bool s_tx_busy = false;
 static volatile bool s_configured = false;
 static volatile bool s_gps_stream_mode = false;
 static volatile bool s_gps_stream_exit_requested = false;
-static volatile bool s_echo_enabled = false;
 
 static portMUX_TYPE s_line_mux = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_tx_mux = portMUX_INITIALIZER_UNLOCKED;
@@ -79,97 +77,6 @@ static struct usbd_interface s_intf1;
 static bool s_esp_console_inited = false;
 static bool s_stdio_redirect_inited = false;
 static bool s_vfs_registered = false;
-
-static int usb_cli_cmd_ver(int argc, char **argv)
-{
-    (void)argc;
-    (void)argv;
-
-    printf("ESPNetLink USB CLI (CDC-ACM)\n");
-    printf("ESP-IDF %s\n", esp_get_idf_version());
-    return 0;
-}
-
-static int usb_cli_cmd_debug(int argc, char **argv)
-{
-    if (argc < 2)
-    {
-        printf("debug %d\n", s_debug_enabled ? 1 : 0);
-        return 0;
-    }
-
-    const int v = atoi(argv[1]);
-    if (v == 0)
-    {
-        s_debug_enabled = false;
-        esp_log_level_set("*", ESP_LOG_NONE);
-        printf("debug 0\n");
-        return 0;
-    }
-    if (v == 1)
-    {
-        s_debug_enabled = true;
-        esp_log_level_set("*", ESP_LOG_DEBUG);
-        printf("debug 1\n");
-        return 0;
-    }
-
-    printf("Usage: debug 0|1\n");
-    return 1;
-}
-
-static int usb_cli_cmd_echo(int argc, char **argv)
-{
-    if (argc < 2)
-    {
-        printf("echo %d\n", s_echo_enabled ? 1 : 0);
-        return 0;
-    }
-
-    const int v = atoi(argv[1]);
-    if (v == 0)
-    {
-        s_echo_enabled = false;
-        printf("echo 0\n");
-        return 0;
-    }
-    if (v == 1)
-    {
-        s_echo_enabled = true;
-        printf("echo 1\n");
-        return 0;
-    }
-
-    printf("Usage: echo 0|1\n");
-    return 1;
-}
-
-static void usb_cli_register_console_commands(void)
-{
-    const esp_console_cmd_t cmd_ver = {
-        .command = "ver",
-        .help = "Print firmware/version info",
-        .hint = NULL,
-        .func = &usb_cli_cmd_ver,
-    };
-    (void)esp_console_cmd_register(&cmd_ver);
-
-    const esp_console_cmd_t cmd_echo = {
-        .command = "echo",
-        .help = "Enable/disable device-side input echo (0|1)",
-        .hint = NULL,
-        .func = &usb_cli_cmd_echo,
-    };
-    (void)esp_console_cmd_register(&cmd_echo);
-
-    const esp_console_cmd_t cmd_debug = {
-        .command = "debug",
-        .help = "Enable/disable global log output (0=off, 1=on)",
-        .hint = NULL,
-        .func = &usb_cli_cmd_debug,
-    };
-    (void)esp_console_cmd_register(&cmd_debug);
-}
 
 static void usb_cli_console_init_esp_console_once(void)
 {
@@ -495,12 +402,11 @@ static void usb_cli_console_task(void *arg)
             continue;
         }
 
-        // If device-side echo is enabled, make sure command output starts on a
-        // fresh line (otherwise it can be appended to the input line).
-        if (s_echo_enabled)
-        {
-            printf("\r\n");
-        }
+        // Always start the command output on a fresh line.
+        // When echo is disabled the host doesn't see a newline after typing;
+        // when echo is enabled the typed characters are already on the line.
+        // Either way, move to the next line before printing any response.
+        printf("\r\n");
 
         int ret = 0;
         esp_err_t err = esp_console_run(line, &ret);
@@ -629,7 +535,7 @@ static void usb_cli_on_rx_bytes(const uint8_t *data, size_t len)
             if (s_line_len > 0)
             {
                 s_line_len--;
-                if (s_echo_enabled)
+                if (usb_cli_echo_is_enabled())
                 {
                     // Echo backspace sequence: move left, erase, move left.
                     usb_cli_tx_enqueue_from_task("\b \b", 3);
@@ -641,7 +547,7 @@ static void usb_cli_on_rx_bytes(const uint8_t *data, size_t len)
         if (s_line_len < (sizeof(s_line_buf) - 1))
         {
             s_line_buf[s_line_len++] = c;
-            if (s_echo_enabled)
+            if (usb_cli_echo_is_enabled())
             {
                 // Echo typed character.
                 usb_cli_tx_enqueue_from_task(&c, 1);

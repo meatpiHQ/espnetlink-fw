@@ -897,10 +897,12 @@ static int cmd_lte(int argc, char **argv)
 {
     if (argc < 2)
     {
-        printf("Usage: lte -s | -r | -n | -i\n");
+        printf("Usage: lte -s | -r | -n | -p | -o | -i\n");
         printf("  -s  full status\n");
         printf("  -r  signal quality (RSSI/BER)\n");
         printf("  -n  network attachment\n");
+        printf("  -p  PPP connection status\n");
+        printf("  -o  operator name\n");
         printf("  -i  current IP address\n");
         return 0;
     }
@@ -980,6 +982,25 @@ static int cmd_lte(int argc, char **argv)
         return 0;
     }
 
+    if (strcmp(flag, "-p") == 0)
+    {
+        printf("PPP: %s\n", st.ppp_connected ? "connected" : "disconnected");
+        return 0;
+    }
+
+    if (strcmp(flag, "-o") == 0)
+    {
+        if (st.operator_name[0] != '\0')
+        {
+            printf("Operator: %s (act=%d)\n", st.operator_name, st.operator_act);
+        }
+        else
+        {
+            printf("Operator: (not yet queried)\n");
+        }
+        return 0;
+    }
+
     if (strcmp(flag, "-s") == 0)
     {
         printf("--- LTE Status ---\n");
@@ -1008,7 +1029,7 @@ static int cmd_lte(int argc, char **argv)
         return 0;
     }
 
-    printf("lte: unknown flag '%s'. Use -s, -r, or -n\n", flag);
+    printf("lte: unknown flag '%s'. Use -s, -r, -n, -p, -o or -i\n", flag);
     return 1;
 }
 
@@ -1023,8 +1044,8 @@ void lte_upstream_pppos_console_register(void)
 
     const esp_console_cmd_t cmd = {
         .command = "lte",
-        .help    = "LTE modem status. Flags: -s full status, -r signal/RSSI, -n network attachment, -i IP address",
-        .hint    = "-s|-r|-n|-i",
+        .help    = "LTE modem status. Flags: -s full status, -r signal/RSSI, -n network attachment, -p PPP status, -o operator, -i IP address",
+        .hint    = "-s|-r|-n|-p|-o|-i",
         .func    = &cmd_lte,
     };
     (void)esp_console_cmd_register(&cmd);
