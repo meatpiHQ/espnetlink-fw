@@ -11,6 +11,7 @@
 #include "esp_console.h"
 #include "esp_err.h"
 #include "esp_idf_version.h"
+#include "esp_log.h"
 #include "esp_vfs.h"
 
 #include "gps.h"
@@ -37,6 +38,10 @@
 #ifndef USB_CLI_LINE_BUF_SIZE
 #define USB_CLI_LINE_BUF_SIZE 128
 #endif
+
+#define USB_CLI_PROMPT "esp> "
+
+static bool s_debug_enabled = false;
 
 static bool s_enabled = false;
 static TaskHandle_t s_task = NULL;
@@ -85,6 +90,34 @@ static int usb_cli_cmd_ver(int argc, char **argv)
     return 0;
 }
 
+static int usb_cli_cmd_debug(int argc, char **argv)
+{
+    if (argc < 2)
+    {
+        printf("debug %d\n", s_debug_enabled ? 1 : 0);
+        return 0;
+    }
+
+    const int v = atoi(argv[1]);
+    if (v == 0)
+    {
+        s_debug_enabled = false;
+        esp_log_level_set("*", ESP_LOG_NONE);
+        printf("debug 0\n");
+        return 0;
+    }
+    if (v == 1)
+    {
+        s_debug_enabled = true;
+        esp_log_level_set("*", ESP_LOG_DEBUG);
+        printf("debug 1\n");
+        return 0;
+    }
+
+    printf("Usage: debug 0|1\n");
+    return 1;
+}
+
 static int usb_cli_cmd_echo(int argc, char **argv)
 {
     if (argc < 2)
@@ -128,6 +161,14 @@ static void usb_cli_register_console_commands(void)
         .func = &usb_cli_cmd_echo,
     };
     (void)esp_console_cmd_register(&cmd_echo);
+
+    const esp_console_cmd_t cmd_debug = {
+        .command = "debug",
+        .help = "Enable/disable global log output (0=off, 1=on)",
+        .hint = NULL,
+        .func = &usb_cli_cmd_debug,
+    };
+    (void)esp_console_cmd_register(&cmd_debug);
 }
 
 static void usb_cli_console_init_esp_console_once(void)
@@ -394,7 +435,7 @@ static void usb_cli_console_task(void *arg)
     usb_cli_console_init_esp_console_once();
 
     printf("ESPNetLink console. Type 'help'.\n");
-    printf("\r\n> ");
+    printf("\r\n" USB_CLI_PROMPT);
 
     while (true)
     {
@@ -406,7 +447,7 @@ static void usb_cli_console_task(void *arg)
             s_gps_stream_mode = false;
             gps_set_streaming(false);
             printf("\n[console mode]\n");
-            printf("\r\n> ");
+            printf("\r\n" USB_CLI_PROMPT);
             continue;
         }
 
@@ -450,7 +491,7 @@ static void usb_cli_console_task(void *arg)
 
         if (len == 0)
         {
-            printf("\r\n> ");
+            printf("\r\n" USB_CLI_PROMPT);
             continue;
         }
 
@@ -463,6 +504,7 @@ static void usb_cli_console_task(void *arg)
 
         int ret = 0;
         esp_err_t err = esp_console_run(line, &ret);
+        bool cmd_success = false;
         if (err == ESP_ERR_NOT_FOUND)
         {
             printf("Unrecognized command\n");
@@ -475,10 +517,14 @@ static void usb_cli_console_task(void *arg)
         {
             printf("Command error: %s\n", esp_err_to_name(err));
         }
+        else
+        {
+            cmd_success = (ret == 0);
+        }
 
         if (!s_gps_stream_mode)
         {
-            printf("\r\n> ");
+            printf("%s\r\n" USB_CLI_PROMPT, cmd_success ? "OK" : "ERROR");
         }
     }
 }
