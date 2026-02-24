@@ -47,6 +47,7 @@ static lte_upstream_pppos_config_t s_saved_cfg;
 static char s_saved_apn[64];
 static char s_saved_user[32];
 static char s_saved_pass[32];
+static char s_saved_pin[16];
 
 static void on_ppp_changed(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
@@ -101,14 +102,30 @@ static void on_ppp_changed(void *arg, esp_event_base_t event_base, int32_t event
     }
 }
 
-static esp_err_t wait_for_cellular_attach(esp_modem_dce_t *dce, uint32_t timeout_ms)
+static esp_err_t wait_for_cellular_attach(esp_modem_dce_t *dce, uint32_t timeout_ms,
+                                           const char *pin)
 {
     const int64_t deadline = esp_timer_get_time() / 1000 + timeout_ms;
     bool pin_ok = true;
     if (esp_modem_read_pin(dce, &pin_ok) == ESP_OK && !pin_ok)
     {
-        ESP_LOGE(TAG, "SIM requires PIN (CPIN not ready)");
-        return ESP_ERR_INVALID_STATE;
+        if (pin && pin[0] != '\0')
+        {
+            ESP_LOGI(TAG, "SIM PIN required – entering PIN");
+            esp_err_t perr = esp_modem_set_pin(dce, (char *)pin);
+            if (perr != ESP_OK)
+            {
+                ESP_LOGE(TAG, "SIM PIN entry failed: %s", esp_err_to_name(perr));
+                return perr;
+            }
+            /* Give the modem a moment to verify the PIN and unlock */
+            vTaskDelay(pdMS_TO_TICKS(3000));
+        }
+        else
+        {
+            ESP_LOGE(TAG, "SIM PIN required but no PIN configured");
+            return ESP_ERR_INVALID_STATE;
+        }
     }
 
     while ((esp_timer_get_time() / 1000) < deadline)
@@ -116,17 +133,34 @@ static esp_err_t wait_for_cellular_attach(esp_modem_dce_t *dce, uint32_t timeout
         int rssi = 0, ber = 0;
         (void)esp_modem_get_signal_quality(dce, &rssi, &ber);
 
-        int attached = 0;
-        esp_err_t err = esp_modem_get_network_attachment_state(dce, &attached);
-        if (err == ESP_OK && attached == 1)
+        /* Primary check: AT+CEREG? (EPS/LTE registration – states 1=home, 5=roaming).
+         * AT+CGATT? only covers GPRS PS attach and stays 0 on LTE-only networks,
+         * so we prefer CEREG and fall back to CGATT if CEREG is unavailable. */
+        int reg_state = 0;
+        bool registered = false;
+        if (esp_modem_get_network_registration_state(dce, &reg_state) == ESP_OK)
         {
-            ESP_LOGI(TAG, "Cellular attached (rssi=%d ber=%d)", rssi, ber);
-            return ESP_OK;
+            registered = (reg_state == 1 || reg_state == 5);
+            if (registered)
+            {
+                ESP_LOGI(TAG, "LTE registered (CEREG state=%d, rssi=%d ber=%d)", reg_state, rssi, ber);
+                return ESP_OK;
+            }
+            ESP_LOGW(TAG, "Waiting for LTE registration... (CEREG state=%d rssi=%d ber=%d)",
+                     reg_state, rssi, ber);
+        }
+        else
+        {
+            /* CEREG not supported – fall back to AT+CGATT? */
+            int attached = 0;
+            if (esp_modem_get_network_attachment_state(dce, &attached) == ESP_OK && attached == 1)
+            {
+                ESP_LOGI(TAG, "Cellular attached via CGATT (rssi=%d ber=%d)", rssi, ber);
+                return ESP_OK;
+            }
+            ESP_LOGW(TAG, "Waiting for cellular attach... (rssi=%d ber=%d)", rssi, ber);
         }
 
-        ESP_LOGW(TAG, "Waiting for cellular attach... (rssi=%d ber=%d)", rssi, ber);
-        // Best-effort request attach in case it's detached
-        (void)esp_modem_set_network_attachment_state(dce, 1);
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
 
@@ -255,17 +289,34 @@ static void lte_monitor_task(void *arg)
             ESP_LOGW(TAG_MON, "Signal quality query failed");
         }
 
-        int attached = 0;
-        if (esp_modem_get_network_attachment_state(s_dce, &attached) == ESP_OK)
+        /* Use AT+CEREG? for LTE/EPS registration (states 1=home, 5=roaming).
+         * AT+CGATT? only covers GPRS-PS and returns 0 on LTE-only networks,
+         * which would incorrectly keep BIT_NETWORK_DETACHED set and prevent
+         * the supervisor from ever seeing a healthy connection. */
+        int reg_state = 0;
+        bool net_registered = false;
+        if (esp_modem_get_network_registration_state(s_dce, &reg_state) == ESP_OK)
         {
-            ESP_LOGI(TAG_MON, "Network: %s", attached ? "attached" : "detached");
-            if (s_evt)
+            net_registered = (reg_state == 1 || reg_state == 5);
+            ESP_LOGI(TAG_MON, "Network: %s (CEREG state=%d)",
+                     net_registered ? "registered" : "not registered", reg_state);
+        }
+        else
+        {
+            /* CEREG unavailable – fall back to AT+CGATT? */
+            int attached = 0;
+            if (esp_modem_get_network_attachment_state(s_dce, &attached) == ESP_OK)
             {
-                if (attached == 1)
-                    xEventGroupClearBits(s_evt, BIT_NETWORK_DETACHED);
-                else
-                    xEventGroupSetBits(s_evt, BIT_NETWORK_DETACHED);
+                net_registered = (attached == 1);
+                ESP_LOGI(TAG_MON, "Network: %s (CGATT)", net_registered ? "attached" : "detached");
             }
+        }
+        if (s_evt)
+        {
+            if (net_registered)
+                xEventGroupClearBits(s_evt, BIT_NETWORK_DETACHED);
+            else
+                xEventGroupSetBits(s_evt, BIT_NETWORK_DETACHED);
         }
 
         bool ppp_up = false;
@@ -291,7 +342,7 @@ static void lte_monitor_task(void *arg)
         s_status.rssi          = rssi;
         s_status.rssi_dbm      = (rssi < 99) ? (rssi * 2 - 113) : 0;
         s_status.ber           = ber;
-        s_status.attached      = (attached == 1);
+        s_status.attached      = net_registered;
         s_status.ppp_connected = ppp_up;
         s_status.operator_act  = op_act;
         /* op_name only changes every 4 polls; copy it every time (cheap) */
@@ -309,7 +360,7 @@ static void lte_monitor_task(void *arg)
 static void lte_save_config(const lte_upstream_pppos_config_t *cfg)
 {
     s_saved_cfg = *cfg;
-    s_saved_apn[0] = s_saved_user[0] = s_saved_pass[0] = '\0';
+    s_saved_apn[0] = s_saved_user[0] = s_saved_pass[0] = s_saved_pin[0] = '\0';
 
     if (cfg->apn)
     {
@@ -325,6 +376,11 @@ static void lte_save_config(const lte_upstream_pppos_config_t *cfg)
     {
         strncpy(s_saved_pass, cfg->pass, sizeof(s_saved_pass) - 1);
         s_saved_cfg.pass = s_saved_pass;
+    }
+    if (cfg->pin)
+    {
+        strncpy(s_saved_pin, cfg->pin, sizeof(s_saved_pin) - 1);
+        s_saved_cfg.pin = s_saved_pin;
     }
     /* Supervisor manages its own reconnect timing; disable blocking wait. */
     s_saved_cfg.connect_timeout_ms = 0;
@@ -395,8 +451,13 @@ static void lte_supervisor_task(void *arg)
 
     int      consecutive_down     = 0;
     int      consecutive_detached = 0;
+    int      consecutive_failures = 0;
     unsigned backoff_ms           = 5000;
-    const unsigned BACKOFF_MAX    = 60000;
+    const unsigned BACKOFF_MAX    = 30000;
+    /* Threshold after which a hung/crashing modem gets a hard power-cycle */
+    const int POWER_CYCLE_THRESHOLD = 3;
+    /* Remember original setting – supervisor may temporarily override it */
+    const bool orig_init_modem_manager = s_saved_cfg.init_modem_manager;
 
     while (s_supervisor_running)
     {
@@ -433,6 +494,7 @@ static void lte_supervisor_task(void *arg)
             /* Truly healthy – reset all counters */
             consecutive_down     = 0;
             consecutive_detached = 0;
+            consecutive_failures = 0;
             backoff_ms = 5000;
             continue;
         }
@@ -497,18 +559,34 @@ static void lte_supervisor_task(void *arg)
         ESP_LOGI(TAG_SUP, "Tearing down LTE stack...");
         lte_inner_stop();
 
-        ESP_LOGI(TAG_SUP, "Restarting LTE stack...");
+        /* After POWER_CYCLE_THRESHOLD consecutive failures the modem is likely
+         * hung (bad state, crashed firmware, hardware issue).  Force a hard
+         * power-cycle via modem_manager so we never stay stuck forever. */
+        if (consecutive_failures >= POWER_CYCLE_THRESHOLD)
+        {
+            ESP_LOGW(TAG_SUP, "Modem unresponsive after %d attempts – forcing power-cycle",
+                     consecutive_failures);
+            s_saved_cfg.init_modem_manager = true;
+        }
+
+        ESP_LOGI(TAG_SUP, "Restarting LTE stack (attempt %d)...", consecutive_failures + 1);
         esp_err_t err = lte_inner_start(&s_saved_cfg);
+
+        /* Always restore original modem-manager setting after the attempt */
+        s_saved_cfg.init_modem_manager = orig_init_modem_manager;
+
         if (err == ESP_OK)
         {
             ESP_LOGI(TAG_SUP, "LTE stack restarted – waiting for IP");
+            consecutive_failures = 0;
             backoff_ms = 5000;
         }
         else
         {
+            consecutive_failures++;
             unsigned next = (backoff_ms * 2 > BACKOFF_MAX) ? BACKOFF_MAX : backoff_ms * 2;
-            ESP_LOGE(TAG_SUP, "LTE restart failed: %s – next retry in %u ms",
-                     esp_err_to_name(err), next);
+            ESP_LOGE(TAG_SUP, "LTE restart failed (attempt %d): %s – next retry in %u ms",
+                     consecutive_failures, esp_err_to_name(err), next);
             backoff_ms = next;
         }
     }
@@ -633,12 +711,41 @@ static esp_err_t lte_inner_start(const lte_upstream_pppos_config_t *cfg)
         return ESP_FAIL;
     }
 
-    if (cfg->hw_flow_control)
+    /* modem_manager already configured and persisted AT+IFC=2,2 when
+     * init_modem_manager=true, so skip the redundant DCE-level call. */
+    if (cfg->hw_flow_control && !cfg->init_modem_manager)
     {
         (void)esp_modem_set_flow_control(s_dce, 2, 2);
     }
 
-    err = wait_for_cellular_attach(s_dce, 60000);
+    /* Set PDP context (APN) before attach so the modem knows which APN to
+     * use when registering on the data network.  Without this AT+CGATT stays
+     * 0 because the modem has no PDP context configured and the APN in
+     * dce_config is only applied during the later PPP dial phase. */
+    {
+        esp_modem_PdpContext_t pdp_ctx = {
+            .context_id    = 1,
+            .protocol_type = "IP",
+            .apn           = cfg->apn,
+        };
+        esp_err_t pdp_err = esp_modem_set_pdp_context(s_dce, &pdp_ctx);
+        if (pdp_err != ESP_OK)
+        {
+            ESP_LOGW(TAG, "esp_modem_set_pdp_context failed: %s (continuing)", esp_err_to_name(pdp_err));
+        }
+        else
+        {
+            ESP_LOGI(TAG, "PDP context set: APN='%s' – modem will register automatically", cfg->apn);
+            /* Do NOT send AT+CGATT=0/1 here. On BG95, AT+CGATT=0 triggers a
+             * radio stack reset which asserts UART BREAK for ~20 ms, corrupting
+             * the esp_modem DTE receive buffer and causing all subsequent AT
+             * commands to fail. modem_manager has just power-cycled the modem,
+             * so there is no stale registration to clear; AT+CGDCONT alone is
+             * sufficient and the modem will attach using the new APN on its own. */
+        }
+    }
+
+    err = wait_for_cellular_attach(s_dce, 60000, cfg->pin);
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "Cellular not attached: %s", esp_err_to_name(err));
@@ -835,7 +942,22 @@ static int cmd_lte(int argc, char **argv)
 
     if (err == ESP_ERR_INVALID_STATE || !st.valid)
     {
-        printf("LTE: no data yet (monitor task not started or first poll pending)\n");
+        if (!s_evt)
+        {
+            printf("LTE: not started\n");
+        }
+        else
+        {
+            EventBits_t bits = xEventGroupGetBits(s_evt);
+            const char *ppp =
+                (bits & BIT_CONNECTED)    ? "connected" :
+                (bits & BIT_DISCONNECTED) ? "disconnected" :
+                                            "connecting";
+            const char *net =
+                (bits & BIT_NETWORK_DETACHED) ? ", network detached" : "";
+            printf("LTE: starting up (PPP %s%s) – signal data available after first monitor poll (~15s)\n",
+                   ppp, net);
+        }
         return 1;
     }
 

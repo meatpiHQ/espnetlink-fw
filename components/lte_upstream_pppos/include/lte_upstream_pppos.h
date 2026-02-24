@@ -18,6 +18,7 @@ typedef struct {
     const char *apn;
     const char *user;
     const char *pass;
+    const char *pin;   // SIM PIN (NULL if PIN lock is disabled, which is the default for most IoT SIMs)
 
     bool init_modem_manager;
 
