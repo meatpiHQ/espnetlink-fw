@@ -4,17 +4,6 @@
 # CMakeLists in this exact order for cmake to work correctly
 cmake_minimum_required(VERSION 3.16)
 
-# Hardware version definitions
-set(ESPNETLINK_V100 1)
-
-set(ESPNETLINK_V100_STR "ESPNETLINK")
-
-set(ESPNETLINK_V100_PREF "espnetlink")
-
-add_definitions(-DESPNETLINK_V100=${ESPNETLINK_V100})
-
-add_definitions(-DESPNETLINK_V100_STR="${ESPNETLINK_V100_STR}")
-
 execute_process(
     COMMAND git describe --tags --always --dirty
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
@@ -27,19 +16,8 @@ string(REPLACE "." "" GIT_SHA "${GIT_SHA}")
 
 add_definitions(-DGIT_SHA="${GIT_SHA1}")
 
-set(HARDWARE_VER ${ESPNETLINK_V100})
-
-add_definitions(-DHARDWARE_VER=${HARDWARE_VER})
-
-set(HW_PREF "${ESPNETLINK_V100_PREF}")
-set(HW_VER "${ESPNETLINK_V100_STR}")
-
-add_definitions(-DHARDWARE_VERSION="${HW_VER}")
-
-set(PROJECT_PREF "espnetlink-fw")
-
 # Form the project binary name
-set(PRJ_BIN "${PROJECT_PREF}_${HW_PREF}_${GIT_SHA}")
+set(PRJ_BIN "espnetlink-fw_${GIT_SHA}")
 
 # CherryUSB (managed component) does not enable any device classes by default on ESP-IDF.
 # Enable Device + RNDIS so `usbd_rndis.c` is compiled and available.
