@@ -15,6 +15,9 @@
 #include "filesystem.h"
 #include "config_manager.h"
 
+#include "nvs.h"
+#include "nvs_flash.h"
+
 // Select exactly one mode (set one to 1, the other to 0)
 #define USB_HOST_MODE        0
 #define USB_DEV_MODE         0
@@ -57,6 +60,31 @@ static void lte_upstream_task(void *arg)
 {
     (void)arg;
 
+    /* Load LTE configuration from config_manager (config.json / schema defaults) */
+    bool lte_enabled = true;
+    config_get_bool("LTE_ENABLED", &lte_enabled);
+    if (!lte_enabled)
+    {
+        ESP_LOGI(TAG, "LTE disabled in config – skipping LTE upstream");
+        vTaskDelete(NULL);
+        return;
+    }
+
+    static char cfg_apn[64];
+    static char cfg_user[32];
+    static char cfg_pass[32];
+    static char cfg_pin[8];
+
+    config_get_str("APN",      cfg_apn,  sizeof(cfg_apn));
+    config_get_str("APN_USER", cfg_user, sizeof(cfg_user));
+    config_get_str("APN_PASS", cfg_pass, sizeof(cfg_pass));
+    config_get_str("APN_PIN",  cfg_pin,  sizeof(cfg_pin));
+
+    ESP_LOGI(TAG, "LTE config: APN='%s' user='%s' pin=%s",
+             cfg_apn,
+             cfg_user[0] ? cfg_user : "(none)",
+             cfg_pin[0]  ? "(set)"  : "(none)");
+
     const lte_upstream_pppos_config_t cfg = {
         .modem = {
             .uart_port = LTE_UART_PORT,
@@ -70,10 +98,10 @@ static void lte_upstream_task(void *arg)
             .status_on_is_low = true,
         },
 
-        // TODO: set your APN
-        .apn = "simbase",
-        .user = NULL,
-        .pass = NULL,
+        .apn  = cfg_apn,
+        .user = cfg_user[0] ? cfg_user : NULL,
+        .pass = cfg_pass[0] ? cfg_pass : NULL,
+        .pin  = cfg_pin[0]  ? cfg_pin  : NULL,
 
         .init_modem_manager = true,
         .baud_rate = 3000000,
@@ -163,6 +191,12 @@ static void iface_tx_task(void *arg)
 
 void app_main(void)
 {
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    esp_log_level_set("*", ESP_LOG_NONE);
 	gpio_reset_pin(USB_SEL_1);
 	gpio_set_direction(USB_SEL_1, GPIO_MODE_INPUT);
 	gpio_set_pull_mode(USB_SEL_1, GPIO_FLOATING);
@@ -272,7 +306,7 @@ void app_main(void)
     #elif USB_DEV_ETHERNET_MODE
     usb_dev_ethernet_set_console_enabled(true);
     ESP_ERROR_CHECK(usb_dev_ethernet_start());
-
+    
 #if USB_DEV_ETHERNET_MODE && ENABLE_LTE_UPSTREAM_PPPOS
     (void)xTaskCreate(lte_upstream_task, "lte_pppos", 6144, NULL, 5, NULL);
 #endif
