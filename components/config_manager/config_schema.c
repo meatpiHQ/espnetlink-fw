@@ -27,6 +27,7 @@ const config_schema_entry_t g_config_schema[] =
     { "APN",          CONFIG_TYPE_STRING,   64,      "internet",   0,           false },
     { "APN_USER",     CONFIG_TYPE_STRING,   32,      "",           0,           false },
     { "APN_PASS",     CONFIG_TYPE_STRING,   32,      "",           0,           false },
+    { "APN_PIN",      CONFIG_TYPE_STRING,   8,       "",           0,           false },
     { "DEVICE_NAME",  CONFIG_TYPE_STRING,   32,      "ESPNetLink", 0,           false },
     { "LTE_ENABLED",  CONFIG_TYPE_BOOL,     0,       NULL,         0,           true  },
     { "GPS_ENABLED",  CONFIG_TYPE_BOOL,     0,       NULL,         0,           true  },
