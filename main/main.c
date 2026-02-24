@@ -75,6 +75,9 @@ static void lte_upstream_task(void *arg)
     static char cfg_pass[32];
     static char cfg_pin[8];
 
+    bool ncm_sharing = true;
+    config_get_bool("NCM_SHARE", &ncm_sharing);
+
     config_get_str("APN",      cfg_apn,  sizeof(cfg_apn));
     config_get_str("APN_USER", cfg_user, sizeof(cfg_user));
     config_get_str("APN_PASS", cfg_pass, sizeof(cfg_pass));
@@ -107,7 +110,7 @@ static void lte_upstream_task(void *arg)
         .baud_rate = 3000000,
         .hw_flow_control = true,
 
-        .enable_usb_ncm_sharing = false,
+        .enable_usb_ncm_sharing = ncm_sharing,
         .connect_timeout_ms = 0,
     };
 
