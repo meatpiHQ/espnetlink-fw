@@ -160,6 +160,9 @@ void usbnet_lwip_start_in_tcpip(void *arg)
 
     st->lwip_started = true;
     st->lwip_ready = true;
+
+    /* If enable_sharing() was called before we were ready, apply it now. */
+    usbnet_rndis_apply_pending_share();
 }
 
 void usbnet_lwip_stop_in_tcpip(void *arg)

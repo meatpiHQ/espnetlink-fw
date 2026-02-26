@@ -19,6 +19,10 @@ static const char *TAG = "usb_dev_eth";
 
 static TaskHandle_t s_dns_task = NULL;
 static int s_dns_sock = -1;
+/* Persistent upstream UDP socket – reused across queries to avoid per-query
+ * socket creation/teardown overhead, which adds noticeable latency on LTE. */
+static int s_up_sock = -1;
+static uint32_t s_up_sock_dns_addr = 0; /* tracks which upstream s_up_sock targets */
 
 static bool usbnet_is_usb_client_ipv4(uint32_t be_addr)
 {
@@ -85,36 +89,46 @@ static void usbnet_dns_proxy_task(void *arg)
             IP4_ADDR(&upstream, 8, 8, 8, 8);
         }
 
-        int up = lwip_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-        if (up < 0)
+        /* (Re-)create the upstream socket if it doesn't exist yet or the
+         * upstream DNS server has changed (e.g. after PPP reconnect). */
+        if (s_up_sock >= 0 && s_up_sock_dns_addr != upstream.addr)
         {
-            continue;
+            lwip_close(s_up_sock);
+            s_up_sock = -1;
         }
 
-        struct timeval tv = {
-            .tv_sec = 2,
-            .tv_usec = 0,
-        };
-        (void)lwip_setsockopt(up, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        if (s_up_sock < 0)
+        {
+            s_up_sock = lwip_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+            if (s_up_sock < 0)
+            {
+                continue;
+            }
+            struct timeval tv = { .tv_sec = 2, .tv_usec = 0 };
+            (void)lwip_setsockopt(s_up_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+            s_up_sock_dns_addr = upstream.addr;
+        }
 
         struct sockaddr_in upstream_addr = { 0 };
         upstream_addr.sin_family = AF_INET;
         upstream_addr.sin_port = lwip_htons(53);
         upstream_addr.sin_addr.s_addr = upstream.addr;
 
-        if (lwip_sendto(up, buf, n, 0, (struct sockaddr *)&upstream_addr, sizeof(upstream_addr)) < 0)
+        if (lwip_sendto(s_up_sock, buf, n, 0, (struct sockaddr *)&upstream_addr, sizeof(upstream_addr)) < 0)
         {
-            (void)lwip_close(up);
+            lwip_close(s_up_sock);
+            s_up_sock = -1;
             continue;
         }
 
         struct sockaddr_in from = { 0 };
         socklen_t flen = sizeof(from);
-        int rn = lwip_recvfrom(up, buf, sizeof(buf), 0, (struct sockaddr *)&from, &flen);
-        (void)lwip_close(up);
-
+        int rn = lwip_recvfrom(s_up_sock, buf, sizeof(buf), 0, (struct sockaddr *)&from, &flen);
         if (rn <= 0)
         {
+            /* Timeout or error – close and recreate on the next query. */
+            lwip_close(s_up_sock);
+            s_up_sock = -1;
             continue;
         }
 

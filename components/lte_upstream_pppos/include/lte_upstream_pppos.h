@@ -30,6 +30,7 @@ typedef struct {
     bool enable_usb_ncm_sharing;
 
     uint32_t connect_timeout_ms;
+    uint32_t reg_timeout_ms;       /* LTE registration wait timeout in ms (0 = default 120 s) */
 } lte_upstream_pppos_config_t;
 
 // Snapshot of LTE modem status — filled by lte_upstream_pppos_get_status().
@@ -43,6 +44,7 @@ typedef struct {
     esp_ip4_addr_t current_ip; // last IP assigned by PPP; zeroed when lost
     char  operator_name[64]; // operator name from AT+COPS (empty until first query)
     int   operator_act;      // access technology (7=LTE, 2=UTRAN, etc.)
+    char  network_type[32];  // human-readable from AT+QNWINFO: "CAT-M1", "NB-IoT", "LTE", "HSPA+", "GSM", etc.
 } lte_status_t;
 
 esp_err_t lte_upstream_pppos_start(const lte_upstream_pppos_config_t *cfg);

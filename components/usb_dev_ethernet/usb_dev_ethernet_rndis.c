@@ -1,4 +1,5 @@
 #include "usb_dev_ethernet.h"
+#include "private/usbnet_lwip.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -67,7 +68,11 @@ esp_err_t usb_dev_ethernet_enable_sharing(uint32_t dns_ipv4_addr)
     usbnet_state_t *st = usbnet_state();
     if (!st->lwip_ready)
     {
-        return ESP_ERR_INVALID_STATE;
+        /* USB interface not yet up – store request and apply it once lwip starts. */
+        st->pending_share = true;
+        st->pending_dns.addr = dns_ipv4_addr;
+        ESP_LOGI(TAG, "USB not ready yet – sharing will be enabled once USB is configured");
+        return ESP_OK;
     }
 
     usbnet_sharing_cfg_t *cfg = (usbnet_sharing_cfg_t *)calloc(1, sizeof(*cfg));
@@ -86,4 +91,25 @@ esp_err_t usb_dev_ethernet_enable_sharing(uint32_t dns_ipv4_addr)
 
     ESP_LOGI(TAG, "USB RNDIS sharing enabled (NAT + DHCP DNS)");
     return ESP_OK;
+}
+
+void usbnet_rndis_apply_pending_share(void)
+{
+    usbnet_state_t *st = usbnet_state();
+    if (!st->pending_share)
+    {
+        return;
+    }
+    st->pending_share = false;
+
+    /* Reuse the existing helper directly – we're already on the tcpip thread. */
+    usbnet_sharing_cfg_t *cfg = (usbnet_sharing_cfg_t *)calloc(1, sizeof(*cfg));
+    if (!cfg)
+    {
+        ESP_LOGE(TAG, "apply_pending_share: alloc failed");
+        return;
+    }
+    cfg->dns_ipv4_addr = st->pending_dns.addr;
+    usbnet_enable_sharing_in_tcpip(cfg); /* frees cfg */
+    ESP_LOGI(TAG, "Deferred USB RNDIS sharing applied (NAT + DHCP DNS)");
 }

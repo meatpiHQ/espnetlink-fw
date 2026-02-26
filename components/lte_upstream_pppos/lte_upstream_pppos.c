@@ -16,6 +16,8 @@
 
 #include "lte_upstream_pppos.h"
 
+#include "hw_config.h"
+#include "driver/gpio.h"
 #include "usb_dev_ethernet.h"
 #include "esp_timer.h"
 
@@ -48,6 +50,64 @@ static char s_saved_apn[64];
 static char s_saved_user[32];
 static char s_saved_pass[32];
 static char s_saved_pin[16];
+
+/* Convert 3GPP TS 27.007 access-technology code to a short label */
+static const char *lte_act_to_str(int act)
+{
+    switch (act)
+    {
+    case 0:  return "GSM";
+    case 1:  return "GSM Compact";
+    case 2:  return "3G";
+    case 3:  return "EDGE";
+    case 4:  return "HSDPA";
+    case 5:  return "HSUPA";
+    case 6:  return "HSPA+";
+    case 7:  return "LTE";
+    case 8:  return "EC-GSM-IoT";
+    case 9:  return "NB-IoT";
+    case 10: return "LTE (5GCN)";
+    case 11: return "5G NR";
+    case 12: return "5G NG-RAN";
+    case 13: return "LTE-NR";
+    default: return "unknown";
+    }
+}
+
+/* Query AT+QNWINFO (Quectel-specific) for the actual serving network type.
+ * Parses the first quoted token from the response:
+ *   +QNWINFO: "CAT-M1","50501","LTE BAND 28",9410
+ * Writes up to (out_len-1) chars into out.  Returns ESP_OK on success,
+ * or an error code if the modem does not support the command. */
+static esp_err_t query_qnwinfo(char *out, size_t out_len)
+{
+    char resp[128] = {0};
+    esp_err_t err = esp_modem_at(s_dce, "AT+QNWINFO", resp, 2000);
+    if (err != ESP_OK)
+    {
+        return err;
+    }
+    /* Find the first quoted token */
+    const char *p = strchr(resp, '"');
+    if (!p)
+    {
+        return ESP_ERR_NOT_FOUND;
+    }
+    p++; /* skip opening quote */
+    const char *end = strchr(p, '"');
+    if (!end)
+    {
+        return ESP_ERR_NOT_FOUND;
+    }
+    size_t len = (size_t)(end - p);
+    if (len >= out_len)
+    {
+        len = out_len - 1;
+    }
+    memcpy(out, p, len);
+    out[len] = '\0';
+    return ESP_OK;
+}
 
 static void on_ppp_changed(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
@@ -180,6 +240,7 @@ static void on_ip_event(void *arg, esp_event_base_t event_base, int32_t event_id
         esp_netif_dns_info_t dns_info;
         uint32_t dns_main_addr = 0;
 
+        gpio_set_level(LED_RED_PIN, 0); /* active-low: LED ON */
         ESP_LOGI(TAG, "PPP GOT IP");
         ESP_LOGI(TAG, "IP      : " IPSTR, IP2STR(&event->ip_info.ip));
         ESP_LOGI(TAG, "Netmask : " IPSTR, IP2STR(&event->ip_info.netmask));
@@ -215,6 +276,7 @@ static void on_ip_event(void *arg, esp_event_base_t event_base, int32_t event_id
     }
     else if (event_id == IP_EVENT_PPP_LOST_IP)
     {
+        gpio_set_level(LED_RED_PIN, 1); /* active-low: LED OFF */
         ESP_LOGW(TAG, "PPP LOST IP");
         portENTER_CRITICAL(&s_status_mux);
         s_status.current_ip.addr = 0;
@@ -259,6 +321,7 @@ static void lte_monitor_task(void *arg)
     static const char *TAG_MON = "lte_monitor";
     char op_name[64] = {0};
     int op_act = 0;
+    char net_type[32] = {0};  /* populated by QNWINFO or lte_act_to_str fallback */
     uint32_t poll_count = 0;
 
     while (s_monitor_running)
@@ -327,12 +390,30 @@ static void lte_monitor_task(void *arg)
             ESP_LOGI(TAG_MON, "PPP: %s", ppp_up ? "connected" : "disconnected");
         }
 
-        /* Operator name – query every 4th poll (~60 s) */
+        /* Operator name & network type – query every 4th poll (~60 s) */
         if (poll_count % 4 == 1)
         {
             if (esp_modem_get_operator_name(s_dce, op_name, &op_act) == ESP_OK)
             {
-                ESP_LOGI(TAG_MON, "Operator: \"%s\" (act=%d)", op_name, op_act);
+                /* Prefer AT+QNWINFO (Quectel) for the actual serving technology.
+                 * It correctly distinguishes CAT-M1 vs NB-IoT vs GSM where the
+                 * 3GPP +COPS act code can be ambiguous (e.g. act=8 on BG95). */
+                char qnw[32] = {0};
+                if (query_qnwinfo(qnw, sizeof(qnw)) == ESP_OK && qnw[0] != '\0')
+                {
+                    strncpy(net_type, qnw, sizeof(net_type) - 1);
+                    net_type[sizeof(net_type) - 1] = '\0';
+                    ESP_LOGI(TAG_MON, "Operator: \"%s\"  Network type: %s (QNWINFO, act=%d)",
+                             op_name, net_type, op_act);
+                }
+                else
+                {
+                    /* QNWINFO not supported – fall back to 3GPP act code */
+                    strncpy(net_type, lte_act_to_str(op_act), sizeof(net_type) - 1);
+                    net_type[sizeof(net_type) - 1] = '\0';
+                    ESP_LOGI(TAG_MON, "Operator: \"%s\"  Network type: %s (act=%d)",
+                             op_name, net_type, op_act);
+                }
             }
         }
 
@@ -345,8 +426,11 @@ static void lte_monitor_task(void *arg)
         s_status.attached      = net_registered;
         s_status.ppp_connected = ppp_up;
         s_status.operator_act  = op_act;
-        /* op_name only changes every 4 polls; copy it every time (cheap) */
+        /* op_name / net_type only change every 4 polls; copy every time (cheap) */
         memcpy(s_status.operator_name, op_name, sizeof(s_status.operator_name));
+        strncpy(s_status.network_type, net_type[0] ? net_type : lte_act_to_str(op_act),
+                sizeof(s_status.network_type) - 1);
+        s_status.network_type[sizeof(s_status.network_type) - 1] = '\0';
         portEXIT_CRITICAL(&s_status_mux);
     }
 
@@ -535,8 +619,18 @@ static void lte_supervisor_task(void *arg)
         }
         else
         {
-            /* Status not valid yet – stack is still starting up */
-            continue;
+            /* Status not yet valid – modem is still starting up, or the initial
+             * lte_inner_start failed before the monitor task could run.
+             * Count consecutive polls so we don't spin here forever; trigger
+             * a reconnect after the patience threshold. */
+            consecutive_down++;
+            ESP_LOGD(TAG_SUP, "Modem status not valid yet (%d/5 polls)", consecutive_down);
+            if (consecutive_down >= 5)
+            {
+                consecutive_down = 0;
+                ESP_LOGW(TAG_SUP, "No valid modem status after 5 polls – triggering reconnect");
+                do_reconnect = true;
+            }
         }
 
         if (!do_reconnect)
@@ -745,7 +839,7 @@ static esp_err_t lte_inner_start(const lte_upstream_pppos_config_t *cfg)
         }
     }
 
-    err = wait_for_cellular_attach(s_dce, 60000, cfg->pin);
+    err = wait_for_cellular_attach(s_dce, cfg->reg_timeout_ms > 0 ? cfg->reg_timeout_ms : 120000, cfg->pin);
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "Cellular not attached: %s", esp_err_to_name(err));
@@ -804,10 +898,18 @@ esp_err_t lte_upstream_pppos_start(const lte_upstream_pppos_config_t *cfg)
 
     lte_save_config(cfg);
 
+    /* Configure LED_RED_PIN as output, start with LED off (active-low) */
+    gpio_reset_pin(LED_RED_PIN);
+    gpio_set_direction(LED_RED_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_level(LED_RED_PIN, 1);
+
     esp_err_t err = lte_inner_start(cfg);
     if (err != ESP_OK)
     {
-        return err;
+        /* lte_inner_stop() was already called inside lte_inner_start on failure.
+         * Fall through to start the supervisor so it can retry the connection
+         * rather than giving up permanently. */
+        ESP_LOGW(TAG, "Initial LTE start failed (%s) – supervisor will retry", esp_err_to_name(err));
     }
 
     s_supervisor_running = true;
@@ -815,6 +917,7 @@ esp_err_t lte_upstream_pppos_start(const lte_upstream_pppos_config_t *cfg)
     {
         ESP_LOGW(TAG, "Failed to create lte_supervisor task – no auto-reconnect");
         s_supervisor_task = NULL;
+        return err;  /* no supervisor → propagate the inner-start error */
     }
 
     return ESP_OK;
@@ -1015,6 +1118,7 @@ static int cmd_lte(int argc, char **argv)
         }
 
         printf("  Network  : %s\n", st.attached ? "attached" : "detached");
+        printf("  Net type : %s\n", st.network_type[0] ? st.network_type : "(not yet queried)");
         printf("  PPP      : %s\n", st.ppp_connected ? "connected" : "disconnected");
 
         if (st.operator_name[0] != '\0')
