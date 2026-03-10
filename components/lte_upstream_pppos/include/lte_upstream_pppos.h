@@ -31,6 +31,35 @@ typedef struct {
 
     uint32_t connect_timeout_ms;
     uint32_t reg_timeout_ms;       /* LTE registration wait timeout in ms (0 = default 120 s) */
+
+    /* If LTE registration times out, optionally issue a soft modem reboot.
+     * AT+CFUN=1,1 triggers a full modem restart (Quectel BG95 and many others).
+     * When enabled, the component will send the command once and then fail the
+     * start attempt so the supervisor can retry from a clean state.
+     */
+    bool     reboot_on_reg_timeout;  /* default: false */
+    uint32_t reboot_wait_ms;         /* delay after CFUN (0 = default 15000 ms) */
+
+    bool use_cmux;                 /* true (default) = CMUX (PPP+AT), false = direct DATA mode
+                                    * Direct mode gives higher throughput but AT commands are
+                                    * unavailable while PPP is running (no signal monitor). */
+
+    /* --- USB transport (alternative to UART) --------------------------------
+     * When use_usb = true the component opens the modem's native USB CDC-ACM
+     * port and uses it as the DTE instead of UART.  All other config fields
+     * (apn, user, pass, pin, reg_timeout_ms, use_cmux, …) still apply.
+     * The modem still needs to be powered on – modem_manager (UART) handles
+     * that before the USB DTE is created.
+     *
+     * BG95 defaults:  vid=0x2C7C  pid=0x0095  usb_interface=2
+     * Leave vid/pid/usb_interface at 0 to use those defaults.
+     */
+    bool     use_usb;            /* true = use BG95 USB CDC-ACM port instead of UART */
+    uint16_t usb_vid;            /* USB Vendor ID  (0 = use 0x2C7C)  */
+    uint16_t usb_pid;            /* USB Product ID (0 = use 0x0095)  */
+    uint8_t  usb_interface;      /* CDC-ACM interface for AT/data port (0 = use 2) */
+    int8_t   usb_sel_gpio;       /* GPIO to control USB MUX (-1 = not used)  */
+    bool     usb_sel_level;      /* Logic level to assert on usb_sel_gpio    */
 } lte_upstream_pppos_config_t;
 
 // Snapshot of LTE modem status — filled by lte_upstream_pppos_get_status().

@@ -15,6 +15,7 @@
 #include "esp_netif_ppp.h"
 
 #include "lte_upstream_pppos.h"
+#include "lte_upstream_pppos_usb.h"
 
 #include "hw_config.h"
 #include "driver/gpio.h"
@@ -162,9 +163,51 @@ static void on_ppp_changed(void *arg, esp_event_base_t event_base, int32_t event
     }
 }
 
-static esp_err_t wait_for_cellular_attach(esp_modem_dce_t *dce, uint32_t timeout_ms,
-                                           const char *pin)
+/* Wait until the SIM application is ready (AT+CIMI returns a valid IMSI).
+ * On BG95 after a cold power-on the SIM stack needs ~2-5 s to initialise.
+ * Without waiting, AT+CPIN? may still report READY but AT+CIMI fails and
+ * the modem cannot attach to any operator.  Returns ESP_OK once ready,
+ * ESP_ERR_TIMEOUT if the SIM does not come up within sim_wait_ms. */
+static esp_err_t wait_for_sim_ready(esp_modem_dce_t *dce, uint32_t sim_wait_ms)
 {
+    const int64_t deadline = esp_timer_get_time() / 1000 + sim_wait_ms;
+    int attempt = 0;
+    while ((esp_timer_get_time() / 1000) < deadline)
+    {
+        char imsi[32] = {0};
+        if (esp_modem_at(dce, "AT+CIMI", imsi, 2000) == ESP_OK && imsi[0] >= '0' && imsi[0] <= '9')
+        {
+            ESP_LOGI(TAG, "SIM ready (IMSI: %s) after %d attempts", imsi, attempt + 1);
+            return ESP_OK;
+        }
+        attempt++;
+        ESP_LOGD(TAG, "SIM not ready yet (attempt %d)...", attempt);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+    ESP_LOGW(TAG, "SIM not ready after %u ms – continuing anyway", (unsigned)sim_wait_ms);
+    return ESP_ERR_TIMEOUT;
+}
+
+static esp_err_t wait_for_cellular_attach(esp_modem_dce_t *dce, uint32_t timeout_ms,
+                                           const char *pin,
+                                           bool reboot_on_timeout,
+                                           uint32_t reboot_wait_ms)
+{
+    /* Wait for SIM application to be fully initialised before polling
+     * registration.  Allow up to 30 s; deduct the wait from the overall
+     * registration deadline so we don't extend the total timeout. */
+    const int64_t t_start = esp_timer_get_time() / 1000;
+    wait_for_sim_ready(dce, 30000);
+    const uint32_t sim_wait_elapsed = (uint32_t)(esp_timer_get_time() / 1000 - t_start);
+    if (sim_wait_elapsed < timeout_ms)
+    {
+        timeout_ms -= sim_wait_elapsed;
+    }
+    else
+    {
+        return ESP_ERR_TIMEOUT;
+    }
+
     const int64_t deadline = esp_timer_get_time() / 1000 + timeout_ms;
     bool pin_ok = true;
     if (esp_modem_read_pin(dce, &pin_ok) == ESP_OK && !pin_ok)
@@ -188,10 +231,89 @@ static esp_err_t wait_for_cellular_attach(esp_modem_dce_t *dce, uint32_t timeout
         }
     }
 
+    /* ---- one-shot diagnostics before the registration poll loop ---- */
+    {
+        char diag_buf[128] = {0};
+
+        /* --- Throughput-oriented radio profile (best-effort) ---
+         * Keep these non-fatal: some firmware/SIM/operator combos may reject
+         * one or more commands. We still continue with defaults if that happens.
+         *
+         * BG95 notes:
+         *  - iotopmode=0 -> Cat-M1 only (avoid NB-IoT fallback for data tests)
+         *  - nwscanmode=3 -> LTE-only scan path
+         *  - CPSMS=0 / CEDRXS=0 -> disable power-saving that can throttle data
+         */
+        static const char *perf_cmds[] = {
+            "AT+QCFG=\"iotopmode\",0",
+            "AT+QCFG=\"nwscanmode\",3",
+            "AT+CPSMS=0",
+            "AT+CEDRXS=0",
+        };
+        for (size_t i = 0; i < sizeof(perf_cmds) / sizeof(perf_cmds[0]); i++)
+        {
+            memset(diag_buf, 0, sizeof(diag_buf));
+            esp_err_t perr = esp_modem_at(dce, perf_cmds[i], diag_buf, 2500);
+            if (perr == ESP_OK)
+            {
+                ESP_LOGI(TAG, "%s -> %s", perf_cmds[i], diag_buf[0] ? diag_buf : "OK");
+            }
+            else
+            {
+                ESP_LOGW(TAG, "%s failed: %s", perf_cmds[i], esp_err_to_name(perr));
+            }
+        }
+
+        /* Verify SIM: IMSI – if this fails the SIM is locked, absent, or dead */
+        if (esp_modem_at(dce, "AT+CIMI", diag_buf, 2000) == ESP_OK)
+            ESP_LOGI(TAG, "SIM IMSI  : %s", diag_buf[0] ? diag_buf : "(empty)");
+        else
+            ESP_LOGW(TAG, "AT+CIMI failed – SIM may be absent or locked");
+
+        memset(diag_buf, 0, sizeof(diag_buf));
+        /* ICCID */
+        if (esp_modem_at(dce, "AT+CCID", diag_buf, 2000) == ESP_OK)
+            ESP_LOGI(TAG, "SIM ICCID : %s", diag_buf[0] ? diag_buf : "(empty)");
+
+        memset(diag_buf, 0, sizeof(diag_buf));
+        /* Read back PDP context to confirm APN was stored */
+        if (esp_modem_at(dce, "AT+CGDCONT?", diag_buf, 2000) == ESP_OK)
+            ESP_LOGI(TAG, "AT+CGDCONT? -> %s", diag_buf[0] ? diag_buf : "(empty)");
+        else
+            ESP_LOGW(TAG, "AT+CGDCONT? failed");
+
+        memset(diag_buf, 0, sizeof(diag_buf));
+        /* Configured LTE bands (BG95-specific) */
+        if (esp_modem_at(dce, "AT+QCFG=\"band\"", diag_buf, 2000) == ESP_OK)
+            ESP_LOGI(TAG, "AT+QCFG=band -> %s", diag_buf[0] ? diag_buf : "(empty)");
+
+        memset(diag_buf, 0, sizeof(diag_buf));
+        /* RAT scan sequence / mode */
+        if (esp_modem_at(dce, "AT+QCFG=\"nwscanseq\"", diag_buf, 2000) == ESP_OK)
+            ESP_LOGI(TAG, "AT+QCFG=nwscanseq -> %s", diag_buf[0] ? diag_buf : "(empty)");
+
+        memset(diag_buf, 0, sizeof(diag_buf));
+        if (esp_modem_at(dce, "AT+QCFG=\"nwscanmode\"", diag_buf, 2000) == ESP_OK)
+            ESP_LOGI(TAG, "AT+QCFG=nwscanmode -> %s", diag_buf[0] ? diag_buf : "(empty)");
+
+        memset(diag_buf, 0, sizeof(diag_buf));
+        if (esp_modem_at(dce, "AT+QCFG=\"iotopmode\"", diag_buf, 2000) == ESP_OK)
+            ESP_LOGI(TAG, "AT+QCFG=iotopmode -> %s", diag_buf[0] ? diag_buf : "(empty)");
+    }
+
+    int poll_count = 0;
     while ((esp_timer_get_time() / 1000) < deadline)
     {
         int rssi = 0, ber = 0;
         (void)esp_modem_get_signal_quality(dce, &rssi, &ber);
+
+        /* Detailed Quectel signal quality every 10 s */
+        if ((poll_count % 5) == 0)
+        {
+            char qcsq_buf[64] = {0};
+            if (esp_modem_at(dce, "AT+QCSQ", qcsq_buf, 1000) == ESP_OK && qcsq_buf[0])
+                ESP_LOGI(TAG, "AT+QCSQ -> %s", qcsq_buf);
+        }
 
         /* Primary check: AT+CEREG? (EPS/LTE registration – states 1=home, 5=roaming).
          * AT+CGATT? only covers GPRS PS attach and stays 0 on LTE-only networks,
@@ -221,7 +343,46 @@ static esp_err_t wait_for_cellular_attach(esp_modem_dce_t *dce, uint32_t timeout
             ESP_LOGW(TAG, "Waiting for cellular attach... (rssi=%d ber=%d)", rssi, ber);
         }
 
+        poll_count++;
         vTaskDelay(pdMS_TO_TICKS(2000));
+    }
+
+    /* ---- timeout diagnostics: scan visible operators ---- */
+    ESP_LOGE(TAG, "Registration timed out – dumping diagnostics:");
+    {
+        char diag_buf[256] = {0};
+        if (esp_modem_at(dce, "AT+CEREG?", diag_buf, 1000) == ESP_OK)
+            ESP_LOGI(TAG, "  CEREG?       : %s", diag_buf[0] ? diag_buf : "(empty)");
+        memset(diag_buf, 0, sizeof(diag_buf));
+        if (esp_modem_at(dce, "AT+CREG?", diag_buf, 1000) == ESP_OK)
+            ESP_LOGI(TAG, "  CREG?        : %s", diag_buf[0] ? diag_buf : "(empty)");
+        memset(diag_buf, 0, sizeof(diag_buf));
+        if (esp_modem_at(dce, "AT+QCSQ", diag_buf, 1000) == ESP_OK)
+            ESP_LOGI(TAG, "  QCSQ         : %s", diag_buf[0] ? diag_buf : "(empty)");
+        memset(diag_buf, 0, sizeof(diag_buf));
+        /* Operator scan – can take up to 3 min; use 180 s timeout */
+        ESP_LOGI(TAG, "  Starting operator scan (AT+COPS=?) – may take up to 3 min...");
+        if (esp_modem_at(dce, "AT+COPS=?", diag_buf, 180000) == ESP_OK)
+            ESP_LOGI(TAG, "  COPS=?       : %s", diag_buf[0] ? diag_buf : "(no operators found)");
+        else
+            ESP_LOGW(TAG, "  COPS=? timed out or failed");
+    }
+
+    if (reboot_on_timeout)
+    {
+        char resp[64] = {0};
+        const uint32_t wait_ms = (reboot_wait_ms > 0) ? reboot_wait_ms : 15000;
+        ESP_LOGW(TAG, "Registration timeout: issuing soft reboot (AT+CFUN=1,1), then waiting %u ms", (unsigned)wait_ms);
+        esp_err_t rerr = esp_modem_at(dce, "AT+CFUN=1,1", resp, 2000);
+        if (rerr == ESP_OK)
+        {
+            ESP_LOGI(TAG, "AT+CFUN=1,1 -> %s", resp[0] ? resp : "OK");
+        }
+        else
+        {
+            ESP_LOGW(TAG, "AT+CFUN=1,1 failed: %s", esp_err_to_name(rerr));
+        }
+        vTaskDelay(pdMS_TO_TICKS(wait_ms));
     }
 
     return ESP_ERR_TIMEOUT;
@@ -766,7 +927,7 @@ static esp_err_t lte_inner_start(const lte_upstream_pppos_config_t *cfg)
         .ppp_phase_event_enabled = true,
         .ppp_error_event_enabled = true,
 #ifdef CONFIG_LWIP_ENABLE_LCP_ECHO
-        .ppp_lcp_echo_disabled = false,
+        .ppp_lcp_echo_disabled = true,   /* saves ~1–2% bandwidth on eMTC */
 #endif
     };
     (void)esp_netif_ppp_set_params(s_netif_ppp, &ppp_events);
@@ -783,6 +944,19 @@ static esp_err_t lte_inner_start(const lte_upstream_pppos_config_t *cfg)
     esp_modem_dce_config_t dce_config = ESP_MODEM_DCE_DEFAULT_CONFIG(cfg->apn);
     esp_modem_dte_config_t dte_config = ESP_MODEM_DTE_DEFAULT_CONFIG();
 
+    /* Increase DTE internal ring buffer from the default 512 B to 32 KB.
+     * PPPoS feeds data to lwIP in chunks of this size; the tiny default
+     * causes excessive per-chunk overhead and caps throughput ~10-15 kbps.
+     * Similarly raise the UART TX buffer so upload bursts don't stall.
+     * task_stack_size default is 4096 B — raise to 8192 for CMUX overhead.
+     * task_priority default is 5 — raise to 10 to reduce scheduling latency
+     * vs other tasks (tcpip task runs at 18; keep below that). */
+    dte_config.dte_buffer_size                    = 32768;
+    dte_config.uart_config.rx_buffer_size         = 32768;
+    dte_config.uart_config.tx_buffer_size         = 16384;
+    dte_config.task_stack_size                    = 8192;
+    dte_config.task_priority                      = 10;
+
     dte_config.uart_config.port_num   = cfg->modem.uart_port;
     dte_config.uart_config.tx_io_num  = cfg->modem.tx_pin;
     dte_config.uart_config.rx_io_num  = cfg->modem.rx_pin;
@@ -797,10 +971,27 @@ static esp_err_t lte_inner_start(const lte_upstream_pppos_config_t *cfg)
         dte_config.uart_config.baud_rate = cfg->baud_rate;
     }
 
-    s_dce = esp_modem_new(&dte_config, &dce_config, s_netif_ppp);
+    if (cfg->use_usb) {
+        /* USB CDC-ACM path: use BG95 native USB port as DTE. */
+        ESP_LOGI(TAG, "Creating USB CDC-ACM DTE (VID=0x%04X PID=0x%04X iface=%u)",
+                 cfg->usb_vid  ? cfg->usb_vid  : LTE_USB_VID_QUECTEL,
+                 cfg->usb_pid  ? cfg->usb_pid  : LTE_USB_PID_BG95,
+                 cfg->usb_interface ? cfg->usb_interface : LTE_USB_IFACE_MODEM);
+        s_dce = lte_pppos_usb_create_dce(
+            &dte_config, &dce_config, s_netif_ppp,
+            cfg->usb_sel_gpio,
+            cfg->usb_sel_level,
+            cfg->usb_vid  ? cfg->usb_vid  : LTE_USB_VID_QUECTEL,
+            cfg->usb_pid  ? cfg->usb_pid  : LTE_USB_PID_BG95,
+            cfg->usb_interface ? cfg->usb_interface : LTE_USB_IFACE_MODEM,
+            cfg->connect_timeout_ms);
+    } else {
+        s_dce = esp_modem_new(&dte_config, &dce_config, s_netif_ppp);
+    }
     if (!s_dce)
     {
-        ESP_LOGE(TAG, "esp_modem_new returned NULL");
+        ESP_LOGE(TAG, "%s returned NULL",
+                 cfg->use_usb ? "lte_pppos_usb_create_dce" : "esp_modem_new");
         lte_inner_stop();
         return ESP_FAIL;
     }
@@ -839,7 +1030,12 @@ static esp_err_t lte_inner_start(const lte_upstream_pppos_config_t *cfg)
         }
     }
 
-    err = wait_for_cellular_attach(s_dce, cfg->reg_timeout_ms > 0 ? cfg->reg_timeout_ms : 120000, cfg->pin);
+    err = wait_for_cellular_attach(
+        s_dce,
+        cfg->reg_timeout_ms > 0 ? cfg->reg_timeout_ms : 120000,
+        cfg->pin,
+        cfg->reboot_on_reg_timeout,
+        cfg->reboot_wait_ms);
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "Cellular not attached: %s", esp_err_to_name(err));
@@ -847,21 +1043,45 @@ static esp_err_t lte_inner_start(const lte_upstream_pppos_config_t *cfg)
         return err;
     }
 
-    err = esp_modem_set_mode(s_dce, ESP_MODEM_MODE_CMUX);
-    if (err != ESP_OK)
+    /* Choose CMUX (PPP + AT on same UART) or direct DATA mode (PPP only, no AT).
+     * Direct mode avoids CMUX framing overhead and can deliver higher throughput. */
+    bool use_cmux = cfg->use_cmux;  /* default: false → direct mode unless explicitly set */
+
+    if (use_cmux)
     {
-        ESP_LOGE(TAG, "esp_modem_set_mode(CMUX) failed: %s", esp_err_to_name(err));
-        lte_inner_stop();
-        return err;
+        err = esp_modem_set_mode(s_dce, ESP_MODEM_MODE_CMUX);
+        if (err != ESP_OK)
+        {
+            ESP_LOGE(TAG, "esp_modem_set_mode(CMUX) failed: %s", esp_err_to_name(err));
+            lte_inner_stop();
+            return err;
+        }
+        ESP_LOGI(TAG, "CMUX mode active – PPP on data channel, AT commands on control channel");
+    }
+    else
+    {
+        err = esp_modem_set_mode(s_dce, ESP_MODEM_MODE_DATA);
+        if (err != ESP_OK)
+        {
+            ESP_LOGE(TAG, "esp_modem_set_mode(DATA) failed: %s", esp_err_to_name(err));
+            lte_inner_stop();
+            return err;
+        }
+        ESP_LOGI(TAG, "Direct PPP data mode active (no AT commands available)");
     }
 
-    ESP_LOGI(TAG, "CMUX mode active – PPP on data channel, AT commands on control channel");
-
     s_monitor_running = true;
-    if (xTaskCreate(lte_monitor_task, "lte_monitor", 4096, NULL, 4, &s_monitor_task) != pdPASS)
+    if (use_cmux)
     {
-        ESP_LOGW(TAG, "Failed to create lte_monitor task");
-        s_monitor_task = NULL;
+        if (xTaskCreate(lte_monitor_task, "lte_monitor", 4096, NULL, 4, &s_monitor_task) != pdPASS)
+        {
+            ESP_LOGW(TAG, "Failed to create lte_monitor task");
+            s_monitor_task = NULL;
+        }
+    }
+    else
+    {
+        ESP_LOGI(TAG, "Monitor task skipped (no AT in direct DATA mode)");
     }
 
     ESP_LOGI(TAG, "PPPoS dial started (waiting for IP events)...");
@@ -996,17 +1216,45 @@ esp_err_t lte_upstream_pppos_get_status(lte_status_t *out)
 #endif
 }
 
+/* -----------------------------------------------------------------------
+ * PSM T3412/T3324 timer decoder (3GPP TS 24.008 Table 10.5.163a/172)
+ * Input : 8-char binary string e.g. "00100001"
+ * Returns: seconds, or -1 if deactivated.
+ * ----------------------------------------------------------------------- */
+static int32_t psm_decode_timer(const char *bits8)
+{
+    if (!bits8 || strlen(bits8) < 8) { return -1; }
+    int unit_bits = ((bits8[0]-'0')<<2)|((bits8[1]-'0')<<1)|(bits8[2]-'0');
+    int value = 0;
+    for (int i = 3; i < 8; i++) { value = (value << 1) | (bits8[i] - '0'); }
+    if (unit_bits == 7) { return -1; } /* deactivated */
+    static const int32_t t3412_sec[] = { 10*60, 3600, 10*3600, 2, 30, 60, 320*3600, -1 };
+    return t3412_sec[unit_bits] * value;
+}
+
+static void psm_print_duration(int32_t secs)
+{
+    if (secs < 0)  { printf("deactivated"); return; }
+    if (secs == 0) { printf("0 s"); return; }
+    int h = secs / 3600;  secs %= 3600;
+    int m = secs / 60;    secs %= 60;
+    if (h) printf("%dh ", h);
+    if (m) printf("%dm ", m);
+    if (secs || (!h && !m)) printf("%ds", (int)secs);
+}
+
 static int cmd_lte(int argc, char **argv)
 {
     if (argc < 2)
     {
-        printf("Usage: lte -s | -r | -n | -p | -o | -i\n");
+        printf("Usage: lte -s | -r | -n | -p | -o | -i | -q\n");
         printf("  -s  full status\n");
         printf("  -r  signal quality (RSSI/BER)\n");
         printf("  -n  network attachment\n");
         printf("  -p  PPP connection status\n");
         printf("  -o  operator name\n");
         printf("  -i  current IP address\n");
+        printf("  -q  radio quality + PSM/eDRX power-saving state\n");
         return 0;
     }
 
@@ -1133,7 +1381,124 @@ static int cmd_lte(int argc, char **argv)
         return 0;
     }
 
-    printf("lte: unknown flag '%s'. Use -s, -r, -n, -p, -o or -i\n", flag);
+    if (strcmp(flag, "-q") == 0)
+    {
+        if (!s_dce)
+        {
+            printf("lte -q: modem not running\n");
+            return 1;
+        }
+
+        char resp[256];
+
+        /* --- Extended signal quality --- */
+        printf("--- Radio Quality ---\n");
+        memset(resp, 0, sizeof(resp));
+        if (esp_modem_at(s_dce, "AT+QCSQ", resp, 3000) == ESP_OK)
+        {
+            char *p = resp; while (*p == '\r' || *p == '\n' || *p == ' ') p++;
+            printf("  QCSQ     : %s\n", p);
+            int rsrp = 0, sinr = 0, rsrq = 0;
+            if (sscanf(resp, "+QCSQ: \"%*[^\"]\",%*d,%d,%d,%d", &rsrp, &sinr, &rsrq) == 3)
+            {
+                printf("  RSRP     : %d dBm    (good > -100)\n", rsrp);
+                /* BG95 SINR unit = 0.2 dB; actual dB = raw * 0.2 */
+                printf("  SINR     : %.1f dB  (good > 0, raw=%d)\n", sinr * 0.2f, sinr);
+                printf("  RSRQ     : %d dB    (good > -15)\n",  rsrq);
+                if (rsrp < -110) printf("  WARNING  : RSRP very low - poor coverage may limit speed\n");
+                if (sinr < 0)    printf("  WARNING  : Negative SINR - heavy interference\n");
+            }
+        }
+        else
+        {
+            printf("  QCSQ     : (not supported)\n");
+        }
+
+        memset(resp, 0, sizeof(resp));
+        if (esp_modem_at(s_dce, "AT+QENG=\"servingcell\"", resp, 3000) == ESP_OK)
+        {
+            char *p = resp; while (*p == '\r' || *p == '\n' || *p == ' ') p++;
+            printf("  QENG     : %s\n", p);
+        }
+
+        /* --- PSM --- */
+        printf("\n--- PSM (Power Saving Mode) ---\n");
+        memset(resp, 0, sizeof(resp));
+        if (esp_modem_at(s_dce, "AT+CPSMS?", resp, 3000) == ESP_OK)
+        {
+            char *p = resp; while (*p == '\r' || *p == '\n' || *p == ' ') p++;
+            printf("  CPSMS    : %s\n", p);
+            int mode = -1;
+            char tau_bits[16] = {0}, act_bits[16] = {0};
+            sscanf(resp, "+CPSMS: %d,,\"%*[^\"]\",\"%15[^\"]\",\"%15[^\"]\"",
+                   &mode, tau_bits, act_bits);
+            if (mode < 0) sscanf(resp, "+CPSMS: %d", &mode);
+            printf("  Mode     : %s\n", mode == 1 ? "ENABLED" :
+                                        mode == 0 ? "disabled" : "unknown");
+            if (tau_bits[0])
+            {
+                int32_t tau_s = psm_decode_timer(tau_bits);
+                printf("  TAU T3412: %s -> ", tau_bits);
+                psm_print_duration(tau_s);
+                printf(" (modem sleeps between these periods)\n");
+            }
+            if (act_bits[0])
+            {
+                int32_t act_s = psm_decode_timer(act_bits);
+                printf("  Active T3324: %s -> ", act_bits);
+                psm_print_duration(act_s);
+                printf(" (modem stays awake after TAU for this long)\n");
+                if (act_s >= 0 && act_s < 10)
+                    printf("  WARNING  : Active time < 10s - PSM may kill throughput on first TX\n");
+            }
+            if (mode == 1)
+                printf("  TIP      : Disable PSM with AT+CPSMS=0 to maximise throughput\n");
+        }
+        else
+        {
+            printf("  CPSMS    : (not supported)\n");
+        }
+
+        /* --- eDRX --- */
+        printf("\n--- eDRX (extended Discontinuous Reception) ---\n");
+        memset(resp, 0, sizeof(resp));
+        if (esp_modem_at(s_dce, "AT+CEDRXRDP", resp, 3000) == ESP_OK)
+        {
+            char *p = resp; while (*p == '\r' || *p == '\n' || *p == ' ') p++;
+            printf("  CEDRXRDP : %s\n", p);
+            int act_type = -1;
+            char nw_edrx[8] = {0}, ptw[8] = {0};
+            /* Try full 4-field form first; fall back to single-int form (+CEDRXRDP: 0) */
+            bool edrx_full = (sscanf(resp, "+CEDRXRDP: %d,\"%*[^\"]\",\"%7[^\"]\",\"%7[^\"]\"",
+                                     &act_type, nw_edrx, ptw) == 3);
+            if (!edrx_full)
+            {
+                sscanf(resp, "+CEDRXRDP: %d", &act_type);
+            }
+            if (!edrx_full || nw_edrx[0] == '\0' || strcmp(nw_edrx, "0000") == 0)
+            {
+                printf("  eDRX     : not negotiated / disabled by network\n");
+            }
+            else
+            {
+                int n = 0;
+                for (int i = 0; i < 4; i++) n = (n << 1) | (nw_edrx[i] - '0');
+                float cycle_s = (float)(1 << n) * 10.24f;
+                printf("  NW eDRX cycle : %.1f s\n", cycle_s);
+                if (cycle_s > 20.0f)
+                    printf("  WARNING  : Long eDRX cycle (%.0fs) adds latency/stall on first packet\n",
+                           cycle_s);
+            }
+        }
+        else
+        {
+            printf("  CEDRXRDP : (not supported)\n");
+        }
+
+        return 0;
+    }
+
+    printf("lte: unknown flag '%s'. Use -s, -r, -n, -p, -o, -i or -q\n", flag);
     return 1;
 }
 
@@ -1148,8 +1513,8 @@ void lte_upstream_pppos_console_register(void)
 
     const esp_console_cmd_t cmd = {
         .command = "lte",
-        .help    = "LTE modem status. Flags: -s full status, -r signal/RSSI, -n network attachment, -p PPP status, -o operator, -i IP address",
-        .hint    = "-s|-r|-n|-p|-o|-i",
+        .help    = "LTE modem status. Flags: -s full status, -r signal/RSSI, -n network attachment, -p PPP status, -o operator, -i IP address, -q radio quality/PSM/eDRX",
+        .hint    = "-s|-r|-n|-p|-o|-i|-q",
         .func    = &cmd_lte,
     };
     (void)esp_console_cmd_register(&cmd);

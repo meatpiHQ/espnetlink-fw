@@ -75,8 +75,8 @@ static void lte_upstream_task(void *arg)
     static char cfg_pass[32];
     static char cfg_pin[8];
 
-    bool ncm_sharing = true;
-    config_get_bool("NCM_SHARE", &ncm_sharing);
+    bool ncm_sharing = false;
+    // config_get_bool("NCM_SHARE", &ncm_sharing);
 
     config_get_str("APN",      cfg_apn,  sizeof(cfg_apn));
     config_get_str("APN_USER", cfg_user, sizeof(cfg_user));
@@ -112,6 +112,10 @@ static void lte_upstream_task(void *arg)
 
         .enable_usb_ncm_sharing = ncm_sharing,
         .connect_timeout_ms = 0,
+        /* If the modem gets stuck failing registration, issue a soft reboot. */
+        .reboot_on_reg_timeout = true,
+        .reboot_wait_ms = 90000,
+        .use_cmux = true,
     };
 
     ESP_LOGI(TAG, "Starting LTE upstream PPPoS...");
@@ -199,10 +203,48 @@ void app_main(void)
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
     }
-    esp_log_level_set("*", ESP_LOG_NONE);
+    // esp_log_level_set("*", ESP_LOG_NONE);
 	gpio_reset_pin(USB_SEL_1);
 	gpio_set_direction(USB_SEL_1, GPIO_MODE_INPUT);
 	gpio_set_pull_mode(USB_SEL_1, GPIO_FLOATING);
+
+	gpio_reset_pin(USB_SEL_2);
+	gpio_set_direction(USB_SEL_2, GPIO_MODE_INPUT);
+	gpio_set_pull_mode(USB_SEL_2, GPIO_FLOATING);
+
+    if (gpio_get_level(USB_SEL_2) == 1)
+    {
+        ESP_LOGI(TAG, "USB_SEL_2 is HIGH: checking modem state");
+        /* STATUS pin is LOW when modem is ON (status_on_is_low = true) */
+        gpio_reset_pin(LTE_STATUS_PIN);
+        gpio_set_direction(LTE_STATUS_PIN, GPIO_MODE_INPUT);
+        gpio_set_pull_mode(LTE_STATUS_PIN, GPIO_FLOATING);
+
+        gpio_reset_pin(LTE_PWR_KEY_PIN);
+        gpio_set_direction(LTE_PWR_KEY_PIN, GPIO_MODE_OUTPUT);
+        gpio_set_level(LTE_PWR_KEY_PIN, 0);
+
+        if (gpio_get_level(LTE_STATUS_PIN) != 0)
+        {
+            /* Modem is OFF – pulse PWR_KEY HIGH for 800 ms to power it on */
+            ESP_LOGI(TAG, "Modem is OFF – sending power-on pulse");
+            vTaskDelay(pdMS_TO_TICKS(100));
+            gpio_set_level(LTE_PWR_KEY_PIN, 1);
+            vTaskDelay(pdMS_TO_TICKS(800));
+            gpio_set_level(LTE_PWR_KEY_PIN, 0);
+            ESP_LOGI(TAG, "Modem power-on pulse complete");
+        }
+        else
+        {
+            ESP_LOGI(TAG, "Modem is already ON – skipping power-on pulse");
+        }
+
+        ESP_LOGI(TAG, "Entering infinite loop");
+        while (1)
+        {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+    }
 
     if(gpio_get_level(USB_SEL_1) == 0)
     {
