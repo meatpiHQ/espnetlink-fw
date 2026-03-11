@@ -14,6 +14,7 @@
 #include "hw_config.h"
 #include "filesystem.h"
 #include "config_manager.h"
+#include "gps.h"
 
 #include "nvs.h"
 #include "nvs_flash.h"
@@ -259,6 +260,13 @@ void app_main(void)
     filesystem_init();
 
     config_manager_init();
+
+    // Initialize GPS UART + parser task early so fix data is collected from boot
+    esp_err_t gps_err = gps_init();
+    if (gps_err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "GPS init failed: %s", esp_err_to_name(gps_err));
+    }
 
     #if ((USB_HOST_MODE + USB_DEV_MODE + USB_DEV_ETHERNET_MODE) != 1)
     #error "Select exactly one of USB_HOST_MODE, USB_DEV_MODE, USB_DEV_ETHERNET_MODE"
