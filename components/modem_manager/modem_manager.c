@@ -117,6 +117,36 @@ static modem_mgr_config_t s_cfg;
 
 /*
  * =============================================================================
+ * CMUX FCS (GSM 07.10 CRC-8, reversed polynomial 0xE0)
+ * =============================================================================
+ */
+
+/**
+ * @brief Compute GSM 07.10 FCS (Frame Check Sequence) for CMUX frames
+ * @param data Pointer to bytes to checksum (address, control, and optionally length)
+ * @param len  Number of bytes
+ * @return FCS byte (complement of CRC)
+ */
+static uint8_t cmux_calc_fcs(const uint8_t *data, size_t len)
+{
+    uint8_t fcs = 0xFF;
+    for (size_t i = 0; i < len; i++)
+    {
+        uint8_t byte = data[i];
+        for (int bit = 0; bit < 8; bit++)
+        {
+            if ((fcs ^ byte) & 1)
+                fcs = (fcs >> 1) ^ 0xE0;
+            else
+                fcs >>= 1;
+            byte >>= 1;
+        }
+    }
+    return (uint8_t)~fcs;
+}
+
+/*
+ * =============================================================================
  * UTILITY FUNCTIONS
  * =============================================================================
  */
@@ -998,7 +1028,43 @@ esp_err_t modem_mgr_init(const modem_mgr_config_t *cfg)
                 }
             }
 
-            // Step 2: Try +++ escape sequence (works for plain PPP data mode).
+            // Step 2: Send CMUX CLD (Close Down) frame to exit multiplexer mode.
+            //         DTR and +++ do not work in CMUX – only a proper GSM 07.10
+            //         CLD command or DISC on DLCI 0 can close the session.
+            if (!at_ready)
+            {
+                ESP_LOGW(TAG, "AT unresponsive – sending CMUX close-down frame");
+                modem_uart_teardown();
+                modem_uart_setup(BAUD_REQ, true);
+
+                // CLD (Close Down) in a UIH frame on DLCI 0
+                //  Flag=F9  Addr=03(DLCI0,CR=1,EA=1)  Ctrl=EF(UIH)
+                //  Len=05(2 bytes,EA=1)  Type=C3(CLD,CR=1,EA=1)  CmdLen=01(0,EA=1)
+                //  FCS=xx(over addr+ctrl)  Flag=F9
+                uint8_t cld[] = { 0xF9, 0x03, 0xEF, 0x05, 0xC3, 0x01, 0x00, 0xF9 };
+                cld[6] = cmux_calc_fcs(&cld[1], 2);  // FCS over address + control
+                uart_write_bytes(s_cfg.uart_port, cld, sizeof(cld));
+                uart_wait_tx_done(s_cfg.uart_port, pdMS_TO_TICKS(100));
+                sleep_ms(300);
+
+                // Also try DISC on DLCI 0 as a fallback
+                //  Flag=F9  Addr=03  Ctrl=53(DISC,P=1)  Len=01(0,EA=1)  FCS=xx  Flag=F9
+                uint8_t disc[] = { 0xF9, 0x03, 0x53, 0x01, 0x00, 0xF9 };
+                disc[4] = cmux_calc_fcs(&disc[1], 3);  // FCS over addr+ctrl+len
+                uart_write_bytes(s_cfg.uart_port, disc, sizeof(disc));
+                uart_wait_tx_done(s_cfg.uart_port, pdMS_TO_TICKS(100));
+                sleep_ms(500);
+
+                // Flush any CMUX response frames and try AT
+                uart_flush_input(s_cfg.uart_port);
+                if (at_probe_quick())
+                {
+                    ESP_LOGI(TAG, "CMUX close succeeded – preserving registration");
+                    at_ready = true;
+                }
+            }
+
+            // Step 3: Try +++ escape sequence (works for plain PPP data mode).
             if (!at_ready)
             {
                 ESP_LOGW(TAG, "AT unresponsive – trying +++ escape to exit data mode");

@@ -14,6 +14,8 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 
+#include "lte_upstream_pppos.h"
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
@@ -158,7 +160,13 @@ static int usb_cli_cmd_reboot(int argc, char **argv)
     (void)argc;
     (void)argv;
 
-    printf("Rebooting...\n\n\n\n");
+    printf("Rebooting...\n");
+    /* Cleanly exit CMUX/PPP so the modem returns to AT command mode.
+     * Without this, the modem stays in CMUX after ESP restart and
+     * modem_mgr_init has to power-cycle it (killing LTE registration). */
+    (void)lte_upstream_pppos_stop();
+    printf("\n\n\n");
+    vTaskDelay(pdMS_TO_TICKS(1000));  // allow message to flush before reboot
     esp_restart();
     return 0;
 }
