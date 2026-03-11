@@ -203,7 +203,7 @@ void app_main(void)
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
     }
-    // esp_log_level_set("*", ESP_LOG_NONE);
+    esp_log_level_set("*", ESP_LOG_NONE);
 	gpio_reset_pin(USB_SEL_1);
 	gpio_set_direction(USB_SEL_1, GPIO_MODE_INPUT);
 	gpio_set_pull_mode(USB_SEL_1, GPIO_FLOATING);
