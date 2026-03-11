@@ -76,7 +76,7 @@ static void lte_upstream_task(void *arg)
     static char cfg_pin[8];
 
     bool ncm_sharing = false;
-    // config_get_bool("NCM_SHARE", &ncm_sharing);
+    config_get_bool("NCM_SHARE", &ncm_sharing);
 
     config_get_str("APN",      cfg_apn,  sizeof(cfg_apn));
     config_get_str("APN_USER", cfg_user, sizeof(cfg_user));
