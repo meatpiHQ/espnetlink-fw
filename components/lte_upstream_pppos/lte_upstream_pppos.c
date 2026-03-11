@@ -231,37 +231,74 @@ static esp_err_t wait_for_cellular_attach(esp_modem_dce_t *dce, uint32_t timeout
         }
     }
 
+    /* ---- Check if modem is already registered before touching radio config ---- */
+    {
+        int reg_state = 0;
+        if (esp_modem_get_network_registration_state(dce, &reg_state) == ESP_OK &&
+            (reg_state == 1 || reg_state == 5))
+        {
+            ESP_LOGI(TAG, "Already registered (CEREG state=%d) – skipping radio config", reg_state);
+            return ESP_OK;
+        }
+    }
+
     /* ---- one-shot diagnostics before the registration poll loop ---- */
     {
         char diag_buf[128] = {0};
 
         /* --- Throughput-oriented radio profile (best-effort) ---
-         * Keep these non-fatal: some firmware/SIM/operator combos may reject
-         * one or more commands. We still continue with defaults if that happens.
+         * Only SET a QCFG param when the current value differs from the
+         * desired one.  Blindly writing nwscanmode / iotopmode can trigger
+         * a network detach + reattach on BG95, adding ~50 s to startup.
          *
          * BG95 notes:
          *  - iotopmode=0 -> Cat-M1 only (avoid NB-IoT fallback for data tests)
          *  - nwscanmode=3 -> LTE-only scan path
          *  - CPSMS=0 / CEDRXS=0 -> disable power-saving that can throttle data
          */
-        static const char *perf_cmds[] = {
-            "AT+QCFG=\"iotopmode\",0",
-            "AT+QCFG=\"nwscanmode\",3",
-            "AT+CPSMS=0",
-            "AT+CEDRXS=0",
+
+        /* Read-then-set for QCFG params that can cause network re-scan */
+        static const struct {
+            const char *query;       /* read command */
+            const char *needle;      /* expected substring in response if already correct */
+            const char *set_cmd;     /* write command (only if needle not found) */
+        } qcfg_checks[] = {
+            { "AT+QCFG=\"iotopmode\"",  ",0",  "AT+QCFG=\"iotopmode\",0" },
+            { "AT+QCFG=\"nwscanmode\"", ",3",  "AT+QCFG=\"nwscanmode\",3" },
         };
-        for (size_t i = 0; i < sizeof(perf_cmds) / sizeof(perf_cmds[0]); i++)
+        for (size_t i = 0; i < sizeof(qcfg_checks) / sizeof(qcfg_checks[0]); i++)
         {
             memset(diag_buf, 0, sizeof(diag_buf));
-            esp_err_t perr = esp_modem_at(dce, perf_cmds[i], diag_buf, 2500);
-            if (perr == ESP_OK)
+            esp_err_t qerr = esp_modem_at(dce, qcfg_checks[i].query, diag_buf, 2000);
+            if (qerr == ESP_OK && strstr(diag_buf, qcfg_checks[i].needle))
             {
-                ESP_LOGI(TAG, "%s -> %s", perf_cmds[i], diag_buf[0] ? diag_buf : "OK");
+                ESP_LOGI(TAG, "%s -> %s (already correct)", qcfg_checks[i].query, diag_buf);
             }
             else
             {
-                ESP_LOGW(TAG, "%s failed: %s", perf_cmds[i], esp_err_to_name(perr));
+                /* Value differs or query failed – set it */
+                memset(diag_buf, 0, sizeof(diag_buf));
+                esp_err_t serr = esp_modem_at(dce, qcfg_checks[i].set_cmd, diag_buf, 2500);
+                if (serr == ESP_OK)
+                    ESP_LOGI(TAG, "%s -> %s", qcfg_checks[i].set_cmd, diag_buf[0] ? diag_buf : "OK");
+                else
+                    ESP_LOGW(TAG, "%s failed: %s", qcfg_checks[i].set_cmd, esp_err_to_name(serr));
             }
+        }
+
+        /* PSM and eDRX are safe to set unconditionally (no network re-scan) */
+        static const char *safe_cmds[] = {
+            "AT+CPSMS=0",
+            "AT+CEDRXS=0",
+        };
+        for (size_t i = 0; i < sizeof(safe_cmds) / sizeof(safe_cmds[0]); i++)
+        {
+            memset(diag_buf, 0, sizeof(diag_buf));
+            esp_err_t perr = esp_modem_at(dce, safe_cmds[i], diag_buf, 2500);
+            if (perr == ESP_OK)
+                ESP_LOGI(TAG, "%s -> %s", safe_cmds[i], diag_buf[0] ? diag_buf : "OK");
+            else
+                ESP_LOGW(TAG, "%s failed: %s", safe_cmds[i], esp_err_to_name(perr));
         }
 
         /* Verify SIM: IMSI – if this fails the SIM is locked, absent, or dead */

@@ -447,6 +447,24 @@ static bool at_probe(void)
 }
 
 /**
+ * @brief Fast AT probe with minimal retries for initial responsiveness check
+ * @return true if modem responds with OK within ~600 ms, false otherwise
+ */
+static bool at_probe_quick(void)
+{
+    for (int i = 0; i < 2; ++i)
+    {
+        uart_flush_input(s_cfg.uart_port);
+        ESP_ERROR_CHECK_WITHOUT_ABORT(at_write("AT\r"));
+        if (at_expect_ok(300))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
  * @brief Attempt to establish AT command access at specific baud rate and flow control
  * @param baud Baud rate to try (e.g., 115200, 3000000)
  * @param hwfc true to enable hardware flow control, false to disable
@@ -458,6 +476,21 @@ static bool try_at(int baud, bool hwfc)
     modem_uart_teardown();
     modem_uart_setup(baud, hwfc);
     if (at_probe())
+    {
+        ESP_LOGI(TAG, "AT access at %d baud (hwfc=%s) established", baud, hwfc ? "on" : "off");
+        return true;
+    }
+    return false;
+}
+
+/**
+ * @brief Quick attempt: setup UART and do a fast probe (~600 ms instead of ~13 s)
+ */
+static bool try_at_quick(int baud, bool hwfc)
+{
+    modem_uart_teardown();
+    modem_uart_setup(baud, hwfc);
+    if (at_probe_quick())
     {
         ESP_LOGI(TAG, "AT access at %d baud (hwfc=%s) established", baud, hwfc ? "on" : "off");
         return true;
@@ -929,11 +962,70 @@ esp_err_t modem_mgr_init(const modem_mgr_config_t *cfg)
 
     modem_gpio_init();
 
-    // If modem is ON and potentially in data/cmux, perform a safe reset to command mode
+    bool at_ready = false;
+
     if (modem_status_is_on())
     {
-        ESP_LOGI(TAG, "Modem status: ON -> performing safe reset to ensure command mode");
-        (void)modem_safe_reset_sequence();
+        // Modem is ON – try quick AT probes (~600 ms each instead of ~13 s)
+        // to avoid a power cycle that kills existing LTE registration.
+        ESP_LOGI(TAG, "Modem status: ON -> trying AT access without reset");
+        if (try_at_quick(BAUD_REQ, true) || try_at_quick(BAUD_REQ, false) ||
+            try_at_quick(115200, false)  || try_at_quick(115200, true))
+        {
+            ESP_LOGI(TAG, "AT access OK – skipping power cycle to preserve registration");
+            at_ready = true;
+        }
+        else
+        {
+            // Modem may be in PPP data mode or CMUX.
+            // Step 1: Try DTR toggle to exit data/CMUX mode.
+            //         BG95 with AT&D1 interprets DTR drop as "return to command mode".
+            //         This is instantaneous compared to +++ (which needs 2.2 s guard times)
+            //         and works in CMUX mode where +++ does not.
+            if (s_cfg.dtr_pin != GPIO_NUM_NC && (int)s_cfg.dtr_pin >= 0)
+            {
+                ESP_LOGW(TAG, "AT unresponsive – toggling DTR to exit data/CMUX mode");
+                gpio_set_level(s_cfg.dtr_pin, 0);  // drop DTR
+                sleep_ms(200);
+                gpio_set_level(s_cfg.dtr_pin, 1);  // raise DTR
+                sleep_ms(500);
+                if (try_at_quick(BAUD_REQ, true) || try_at_quick(115200, false))
+                {
+                    ESP_LOGI(TAG, "DTR toggle succeeded – preserving registration");
+                    at_write("ATH\r");
+                    at_expect_ok(1000);
+                    at_ready = true;
+                }
+            }
+
+            // Step 2: Try +++ escape sequence (works for plain PPP data mode).
+            if (!at_ready)
+            {
+                ESP_LOGW(TAG, "AT unresponsive – trying +++ escape to exit data mode");
+                static const int escape_bauds[] = { BAUD_REQ, 115200 };
+                for (size_t i = 0; i < sizeof(escape_bauds) / sizeof(escape_bauds[0]) && !at_ready; i++)
+                {
+                    modem_uart_teardown();
+                    modem_uart_setup(escape_bauds[i], (i == 0));
+                    sleep_ms(1100);                               // guard time before +++
+                    at_write("+++");                              // no \r – raw escape
+                    sleep_ms(1100);                               // guard time after +++
+                    if (at_probe_quick())
+                    {
+                        ESP_LOGI(TAG, "+++ escape succeeded at %d baud – preserving registration", escape_bauds[i]);
+                        at_write("ATH\r");
+                        at_expect_ok(1000);
+                        at_ready = true;
+                    }
+                }
+            }
+
+            if (!at_ready)
+            {
+                ESP_LOGW(TAG, "Modem ON but unresponsive (CMUX or hung) – resetting");
+                (void)modem_safe_reset_sequence();
+            }
+        }
     }
     else
     {
@@ -945,14 +1037,17 @@ esp_err_t modem_mgr_init(const modem_mgr_config_t *cfg)
         }
     }
 
-    // Ensure AT command access
-    esp_err_t err = ensure_at_access_with_recovery();
-    if (err != ESP_OK)
+    esp_err_t err;
+    if (!at_ready)
     {
-        ESP_LOGE(TAG, "Unable to get AT access");
-        // Make sure to release UART before returning
-        modem_uart_teardown();
-        return err;
+        // Ensure AT command access (includes fallback reset if needed)
+        err = ensure_at_access_with_recovery();
+        if (err != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Unable to get AT access");
+            modem_uart_teardown();
+            return err;
+        }
     }
 
     // Configure flow control and baudrate, store if changed
