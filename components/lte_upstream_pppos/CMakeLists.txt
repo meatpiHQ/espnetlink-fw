@@ -3,7 +3,7 @@ idf_component_register(
          "lte_upstream_pppos_usb.cpp"
     INCLUDE_DIRS "include"
     REQUIRES esp_netif esp_event freertos modem_manager esp_modem usb_dev_ethernet console
-             espressif__usb_host_cdc_acm
+             espressif__usb_host_cdc_acm json
     PRIV_REQUIRES driver hw_config usb
 )
 
