@@ -15,6 +15,7 @@
 #include "filesystem.h"
 #include "config_manager.h"
 #include "gps.h"
+#include "imu.h"
 
 #include "nvs.h"
 #include "nvs_flash.h"
@@ -266,6 +267,13 @@ void app_main(void)
     if (gps_err != ESP_OK)
     {
         ESP_LOGE(TAG, "GPS init failed: %s", esp_err_to_name(gps_err));
+    }
+
+    // Initialize IMU (ICM42670) over I2C
+    esp_err_t imu_err = imu_init();
+    if (imu_err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "IMU init failed: %s", esp_err_to_name(imu_err));
     }
 
     #if ((USB_HOST_MODE + USB_DEV_MODE + USB_DEV_ETHERNET_MODE) != 1)

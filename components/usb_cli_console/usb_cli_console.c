@@ -14,6 +14,7 @@
 #include "esp_vfs.h"
 
 #include "gps.h"
+#include "imu.h"
 #include "lte_upstream_pppos.h"
 #include "config_manager.h"
 
@@ -97,6 +98,7 @@ static void usb_cli_console_init_esp_console_once(void)
     esp_console_register_help_command();
     usb_cli_register_console_commands();
     gps_console_register();
+    imu_console_register();
     lte_upstream_pppos_console_register();
     config_manager_console_register();
 
