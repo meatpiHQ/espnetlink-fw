@@ -34,6 +34,7 @@ const config_schema_entry_t g_config_schema[] =
     { "NCM_SHARE",    CONFIG_TYPE_BOOL,     0,       NULL,         0,           true  },
     { "AGNSS_ENABLED",CONFIG_TYPE_BOOL,     0,       NULL,         0,           true  },
     { "GPS_PASSTHRU", CONFIG_TYPE_BOOL,     0,       NULL,         0,           false },
+    { "AGNSS_CACHE_S",CONFIG_TYPE_INT,      0,       NULL,         120,         false },
 };
 /* clang-format on */
 

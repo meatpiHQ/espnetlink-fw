@@ -31,6 +31,7 @@
 #include "freertos/task.h"
 
 #include "gps.h"
+#include "config_manager.h"
 #include "lte_upstream_pppos.h"
 
 #include <time.h>
@@ -345,8 +346,8 @@ esp_err_t agnss_try_inject_time(void)
  * Position cache task
  * ----------------------------------------------------------------------- */
 
-#define CACHE_INTERVAL_MS    (5 * 60 * 1000)   /* 5 minutes */
-#define CACHE_DISTANCE_M     500.0             /* minimum movement in metres */
+#define CACHE_INTERVAL_DEFAULT_S  120            /* 2 minutes */
+#define CACHE_DISTANCE_M         500.0          /* minimum movement in metres */
 
 static volatile bool s_cache_task_running = false;
 
@@ -371,6 +372,9 @@ static void cache_position_task(void *arg)
     bool have_prev = false;
     int64_t last_save_ms = 0;
 
+    int cache_s = CACHE_INTERVAL_DEFAULT_S;
+    config_get_int("AGNSS_CACHE_S", &cache_s);
+    
     while (s_cache_task_running)
     {
         /* Poll quickly (5 s) until first fix is cached, then slow to 30 s */
@@ -382,8 +386,10 @@ static void cache_position_task(void *arg)
             continue;
         }
 
+        int64_t cache_interval_ms = (int64_t)cache_s * 1000;
+
         int64_t now = esp_timer_get_time() / 1000;
-        bool time_ok = (now - last_save_ms) >= CACHE_INTERVAL_MS;
+        bool time_ok = (now - last_save_ms) >= cache_interval_ms;
         bool dist_ok = false;
         if (have_prev)
         {

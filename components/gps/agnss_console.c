@@ -23,6 +23,7 @@
 #include "agnss_internal.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_console.h"
@@ -34,11 +35,12 @@ static int cmd_agnss(int argc, char **argv)
 {
     if (argc < 2)
     {
-        printf("Usage: agnss -s | -v | -e | -d\n");
+        printf("Usage: agnss -s | -v | -e | -d | -i [sec]\n");
         printf("  -s  status    Show AGNSS status\n");
         printf("  -v  save      Save EASY navigation data\n");
         printf("  -e  enable    Enable AGNSS (next boot)\n");
         printf("  -d  disable   Disable AGNSS (next boot)\n");
+        printf("  -i  interval  Get/set cache interval in seconds\n");
         return 1;
     }
 
@@ -98,8 +100,31 @@ static int cmd_agnss(int argc, char **argv)
         return 0;
     }
 
+    if (strcmp(sub, "-i") == 0 || strcmp(sub, "interval") == 0)
+    {
+        if (argc >= 3)
+        {
+            int val = atoi(argv[2]);
+            if (val < 10)
+            {
+                printf("Minimum interval is 10 seconds.\n");
+                return 1;
+            }
+            config_set_int("AGNSS_CACHE_S", val);
+            config_save();
+            printf("Cache interval set to %d s.\n", val);
+        }
+        else
+        {
+            int cur = 120;
+            config_get_int("AGNSS_CACHE_S", &cur);
+            printf("Cache interval: %d s\n", cur);
+        }
+        return 0;
+    }
+
     printf("Unknown option: %s\n", sub);
-    printf("Usage: agnss -s | -v | -e | -d\n");
+    printf("Usage: agnss -s | -v | -e | -d | -i [sec]\n");
     return 1;
 }
 
@@ -112,7 +137,7 @@ void agnss_console_register(void)
 
     const esp_console_cmd_t cmd = {
         .command = "agnss",
-        .help = "AGNSS helpers: -s status, -v save EASY, -e enable, -d disable",
+        .help = "AGNSS: -s status, -v save, -e enable, -d disable, -i [sec] cache interval",
         .hint = NULL,
         .func = &cmd_agnss,
     };
