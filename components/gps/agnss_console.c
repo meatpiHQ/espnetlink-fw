@@ -34,11 +34,17 @@ static int cmd_agnss(int argc, char **argv)
 {
     if (argc < 2)
     {
-        printf("Usage: agnss status | save | enable | disable\n");
+        printf("Usage: agnss -s | -v | -e | -d\n");
+        printf("  -s  status    Show AGNSS status\n");
+        printf("  -v  save      Save EASY navigation data\n");
+        printf("  -e  enable    Enable AGNSS (next boot)\n");
+        printf("  -d  disable   Disable AGNSS (next boot)\n");
         return 1;
     }
 
-    if (strcmp(argv[1], "status") == 0)
+    const char *sub = argv[1];
+
+    if (strcmp(sub, "-s") == 0 || strcmp(sub, "status") == 0)
     {
         bool enabled = true;
         config_get_bool("AGNSS_ENABLED", &enabled);
@@ -62,7 +68,7 @@ static int cmd_agnss(int argc, char **argv)
         return 0;
     }
 
-    if (strcmp(argv[1], "save") == 0)
+    if (strcmp(sub, "-v") == 0 || strcmp(sub, "save") == 0)
     {
         esp_err_t err = agnss_save_easy_data();
         if (err == ESP_OK)
@@ -76,7 +82,7 @@ static int cmd_agnss(int argc, char **argv)
         return (err == ESP_OK) ? 0 : 1;
     }
 
-    if (strcmp(argv[1], "enable") == 0)
+    if (strcmp(sub, "-e") == 0 || strcmp(sub, "enable") == 0)
     {
         config_set_bool("AGNSS_ENABLED", true);
         config_save();
@@ -84,7 +90,7 @@ static int cmd_agnss(int argc, char **argv)
         return 0;
     }
 
-    if (strcmp(argv[1], "disable") == 0)
+    if (strcmp(sub, "-d") == 0 || strcmp(sub, "disable") == 0)
     {
         config_set_bool("AGNSS_ENABLED", false);
         config_save();
@@ -92,8 +98,8 @@ static int cmd_agnss(int argc, char **argv)
         return 0;
     }
 
-    printf("Unknown subcommand: %s\n", argv[1]);
-    printf("Usage: agnss status | save | enable | disable\n");
+    printf("Unknown option: %s\n", sub);
+    printf("Usage: agnss -s | -v | -e | -d\n");
     return 1;
 }
 
@@ -106,7 +112,7 @@ void agnss_console_register(void)
 
     const esp_console_cmd_t cmd = {
         .command = "agnss",
-        .help = "AGNSS fast-fix helpers: status, save, enable, disable",
+        .help = "AGNSS helpers: -s status, -v save EASY, -e enable, -d disable",
         .hint = NULL,
         .func = &cmd_agnss,
     };
