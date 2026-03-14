@@ -13,6 +13,7 @@
 #include "esp_err.h"
 #include "esp_idf_version.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
@@ -62,6 +63,10 @@ static gps_fix_t s_fix;
 #define PAIR_RESP_QUEUE_LEN  4
 #define PAIR_RESP_MAX_LEN    160
 static QueueHandle_t s_pair_queue;
+
+/* Event group bit: set by parser task whenever UART data is received */
+#define GPS_EVT_UART_RX  BIT0
+static EventGroupHandle_t s_gps_evt;
 
 static double gps_coord_to_decimal(int degrees, double minutes, char cardinal)
 {
@@ -229,6 +234,11 @@ static void gps_parser_task(void *arg)
             continue;
         }
 
+        if (s_gps_evt)
+        {
+            xEventGroupSetBits(s_gps_evt, GPS_EVT_UART_RX);
+        }
+
         for (int i = 0; i < n; i++)
         {
             const char c = (char)buf[i];
@@ -332,6 +342,11 @@ esp_err_t gps_init(bool enable_agnss)
                                     PAIR_RESP_MAX_LEN);
     }
 
+    if (!s_gps_evt)
+    {
+        s_gps_evt = xEventGroupCreate();
+    }
+
     xTaskCreate(gps_parser_task, "gps_parser", 4096, NULL, 4, NULL);
 
     s_inited = true;
@@ -340,6 +355,21 @@ esp_err_t gps_init(bool enable_agnss)
     agnss_init(enable_agnss);
 
     return ESP_OK;
+}
+
+bool gps_is_functional(uint32_t timeout_ms)
+{
+    if (!s_gps_evt)
+    {
+        return false;
+    }
+
+    /* Clear the bit, then wait for the parser task to set it again */
+    xEventGroupClearBits(s_gps_evt, GPS_EVT_UART_RX);
+    EventBits_t bits = xEventGroupWaitBits(s_gps_evt, GPS_EVT_UART_RX,
+                                           pdTRUE, pdTRUE,
+                                           pdMS_TO_TICKS(timeout_ms));
+    return (bits & GPS_EVT_UART_RX) != 0;
 }
 
 esp_err_t gps_pair_response_wait(char *out, size_t out_len, uint32_t timeout_ms)
@@ -527,6 +557,7 @@ static int cmd_gps(int argc, char **argv)
     bool opt_print = false;
     bool opt_json = false;
     bool opt_passthru = false;
+    bool opt_check = false;
 
     for (int i = 1; i < argc; i++)
     {
@@ -546,11 +577,23 @@ static int cmd_gps(int argc, char **argv)
         {
             opt_passthru = true;
         }
+        else if (strcmp(argv[i], "-c") == 0)
+        {
+            opt_check = true;
+        }
         else
         {
-            printf("Usage: gps -p [-j] | gps -s | gps -t [0|1]\n");
+            printf("Usage: gps -p [-j] | gps -s | gps -t [0|1] | gps -c\n");
             return 1;
         }
+    }
+
+    if (opt_check)
+    {
+        (void)gps_init(false);
+        bool ok = gps_is_functional(2000);
+        printf("GPS UART: %s\n", ok ? "receiving data" : "no data");
+        return ok ? 0 : 1;
     }
 
     if (opt_passthru)
@@ -603,7 +646,7 @@ static int cmd_gps(int argc, char **argv)
 
     if (!opt_print)
     {
-        printf("Usage: gps -p [-j] | gps -s | gps -t [0|1]\n");
+        printf("Usage: gps -p [-j] | gps -s | gps -t [0|1] | gps -c\n");
         return 1;
     }
 
@@ -621,7 +664,7 @@ void gps_console_register(void)
 
     const esp_console_cmd_t cmd = {
         .command = "gps",
-        .help = "GPS: -p [-j] print fix, -s stream NMEA, -t [0|1] persistent passthrough",
+        .help = "GPS: -p [-j] print fix, -s stream NMEA, -t [0|1] passthrough, -c check UART",
         .hint = NULL,
         .func = &cmd_gps,
     };

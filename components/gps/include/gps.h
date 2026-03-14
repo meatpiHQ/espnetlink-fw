@@ -46,6 +46,13 @@ void gps_set_streaming(bool enabled);
 bool gps_is_streaming(void);
 
 /**
+ * Check if the GPS UART is receiving data.
+ * Clears the RX event flag, waits up to timeout_ms for new data.
+ * @return true if data was received within the timeout.
+ */
+bool gps_is_functional(uint32_t timeout_ms);
+
+/**
  * Wait for a PAIR response line from the LC76G.
  *
  * The GPS parser task intercepts lines starting with "$PAIR" and routes
