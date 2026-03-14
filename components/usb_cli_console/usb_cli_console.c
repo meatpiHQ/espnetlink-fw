@@ -345,7 +345,27 @@ static void usb_cli_console_task(void *arg)
     usb_cli_console_init_esp_console_once();
 
     printf("ESPNetLink console. Type 'help'.\n");
-    printf("\r\n" USB_CLI_PROMPT);
+
+    /* Auto-start GPS passthrough if persisted in config */
+    {
+        bool passthru = false;
+        config_get_bool("GPS_PASSTHRU", &passthru);
+        if (passthru)
+        {
+            (void)gps_init(false);
+            gps_set_streaming(true);
+            s_gps_stream_mode = true;
+            s_escape_len = 0;
+            s_escape_last_tick = 0;
+            s_gps_stream_exit_requested = false;
+            printf("GPS passthrough active (persistent). Ctrl+C to exit.\n");
+        }
+    }
+
+    if (!s_gps_stream_mode)
+    {
+        printf("\r\n" USB_CLI_PROMPT);
+    }
 
     while (true)
     {
@@ -467,12 +487,28 @@ static void usb_cli_on_rx_bytes(const uint8_t *data, size_t len)
 {
     if (s_gps_stream_mode)
     {
-        // Same escape behavior as usb_dev_bridge:
-        // send 7+ '+' (or '=') then Enter to exit stream mode.
-        // While streaming we ignore other input.
+        // Escape options:
+        //   1. Ctrl+C (0x03) — immediate exit, single keystroke
+        //   2. 3+ consecutive '+' (or '=') then Enter
         for (size_t i = 0; i < len; i++)
         {
             const char c = (char)data[i];
+
+            /* Ignore NUL bytes — some terminals pad packets with them */
+            if (c == '\0')
+            {
+                continue;
+            }
+
+            /* Ctrl+C — immediate exit */
+            if (c == 0x03)
+            {
+                s_escape_len = 0;
+                s_escape_last_tick = 0;
+                s_gps_stream_exit_requested = true;
+                usb_cli_kick_task();
+                return;
+            }
 
             if (c == '+' || c == '=')
             {
@@ -486,7 +522,7 @@ static void usb_cli_on_rx_bytes(const uint8_t *data, size_t len)
 
             if (c == '\r' || c == '\n')
             {
-                if (s_escape_len >= 7)
+                if (s_escape_len >= 3)
                 {
                     s_escape_len = 0;
                     s_escape_last_tick = 0;
@@ -500,11 +536,11 @@ static void usb_cli_on_rx_bytes(const uint8_t *data, size_t len)
                 continue;
             }
 
-            // Timeout similar to usb_dev_bridge: if user started an escape but paused, reset.
+            // Timeout: if user started an escape but paused, reset.
             if (s_escape_len > 0 && s_escape_last_tick != 0)
             {
                 TickType_t now = xTaskGetTickCount();
-                if ((now - s_escape_last_tick) > pdMS_TO_TICKS(500))
+                if ((now - s_escape_last_tick) > pdMS_TO_TICKS(2000))
                 {
                     s_escape_len = 0;
                     s_escape_last_tick = 0;

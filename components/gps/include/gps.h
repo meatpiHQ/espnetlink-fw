@@ -16,10 +16,16 @@ typedef struct
     bool     valid;
     double   lat;
     double   lon;
-    int      satellites;
-    int      fix_quality;
+    int      satellites;       /* tracked (from GGA) */
+    int      sats_in_view;     /* visible (from GSV) */
+    int      fix_quality;      /* 0=none, 1=GPS, 2=DGPS (from GGA) */
+    int      fix_type;         /* 1=none, 2=2D, 3=3D (from GSA)    */
     double   altitude_m;
+    double   hdop;
+    double   pdop;
+    double   vdop;
     double   speed_knots;
+    double   speed_kmph;
     double   course_deg;
     uint32_t last_update_ms;
 } gps_fix_snapshot_t;

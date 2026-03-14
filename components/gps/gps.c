@@ -3,6 +3,7 @@
 
 #include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "driver/gpio.h"
@@ -23,7 +24,10 @@ esp_err_t agnss_init(bool enabled);
 
 #include <nmea.h>
 #include <gpgga.h>
+#include <gpgsa.h>
+#include <gpgsv.h>
 #include <gprmc.h>
+#include <gpvtg.h>
 
 typedef struct
 {
@@ -32,9 +36,15 @@ typedef struct
     double lat;
     double lon;
     int satellites;
+    int sats_in_view;
     int fix_quality;
+    int fix_type;
     double altitude_m;
+    double hdop;
+    double pdop;
+    double vdop;
     double speed_knots;
+    double speed_kmph;
     double course_deg;
     uint32_t last_update_ms;
 } gps_fix_t;
@@ -105,6 +115,60 @@ static void gps_fix_update_from_gprmc(const nmea_gprmc_s *gprmc)
     s_fix.speed_knots = gprmc->gndspd_knots;
     s_fix.course_deg = gprmc->track_deg;
     s_fix.last_update_ms = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+
+    xSemaphoreGive(s_fix_lock);
+}
+
+static void gps_fix_update_from_gpgsa(const nmea_gpgsa_s *gsa)
+{
+    if (!gsa)
+    {
+        return;
+    }
+
+    if (xSemaphoreTake(s_fix_lock, pdMS_TO_TICKS(50)) != pdTRUE)
+    {
+        return;
+    }
+
+    s_fix.fix_type = gsa->fixtype - '0';   /* '1'→1, '2'→2, '3'→3 */
+    s_fix.pdop = gsa->pdop;
+    s_fix.hdop = gsa->hdop;
+    s_fix.vdop = gsa->vdop;
+
+    xSemaphoreGive(s_fix_lock);
+}
+
+static void gps_fix_update_from_gpgsv(const nmea_gpgsv_s *gsv)
+{
+    if (!gsv)
+    {
+        return;
+    }
+
+    if (xSemaphoreTake(s_fix_lock, pdMS_TO_TICKS(50)) != pdTRUE)
+    {
+        return;
+    }
+
+    s_fix.sats_in_view = (int)gsv->satellites;
+
+    xSemaphoreGive(s_fix_lock);
+}
+
+static void gps_fix_update_from_gpvtg(const nmea_gpvtg_s *vtg)
+{
+    if (!vtg)
+    {
+        return;
+    }
+
+    if (xSemaphoreTake(s_fix_lock, pdMS_TO_TICKS(50)) != pdTRUE)
+    {
+        return;
+    }
+
+    s_fix.speed_kmph = vtg->gndspd_kmph;
 
     xSemaphoreGive(s_fix_lock);
 }
@@ -218,6 +282,18 @@ static void gps_parser_task(void *arg)
                     else if (msg->type == NMEA_GPRMC)
                     {
                         gps_fix_update_from_gprmc((const nmea_gprmc_s *)msg);
+                    }
+                    else if (msg->type == NMEA_GPGSA)
+                    {
+                        gps_fix_update_from_gpgsa((const nmea_gpgsa_s *)msg);
+                    }
+                    else if (msg->type == NMEA_GPGSV)
+                    {
+                        gps_fix_update_from_gpgsv((const nmea_gpgsv_s *)msg);
+                    }
+                    else if (msg->type == NMEA_GPVTG)
+                    {
+                        gps_fix_update_from_gpvtg((const nmea_gpvtg_s *)msg);
                     }
                     nmea_free(msg);
                 }
@@ -356,15 +432,21 @@ static void gps_print_last_fix(bool json)
     if (json)
     {
         printf("{\"valid\":%s,\"lat\":%.7f,\"lon\":%.7f,"
-               "\"satellites\":%d,\"fix_quality\":%d,"
-               "\"altitude_m\":%.1f,\"speed_knots\":%.2f,"
+               "\"satellites\":%d,\"sats_in_view\":%d,"
+               "\"fix_quality\":%d,\"fix_type\":%d,"
+               "\"altitude_m\":%.1f,"
+               "\"hdop\":%.1f,\"pdop\":%.1f,\"vdop\":%.1f,"
+               "\"speed_knots\":%.2f,\"speed_kmph\":%.2f,"
                "\"course_deg\":%.2f,\"age_ms\":%u,"
                "\"agnss_enabled\":%s,\"time_injected\":%s,"
                "\"position_injected\":%s",
                snap.valid ? "true" : "false",
                snap.lat, snap.lon,
-               snap.satellites, snap.fix_quality,
-               snap.altitude_m, snap.speed_knots,
+               snap.satellites, snap.sats_in_view,
+               snap.fix_quality, snap.fix_type,
+               snap.altitude_m,
+               snap.hdop, snap.pdop, snap.vdop,
+               snap.speed_knots, snap.speed_kmph,
                snap.course_deg, (unsigned)age_ms,
                agnss_enabled ? "true" : "false",
                time_inj ? "true" : "false",
@@ -380,14 +462,15 @@ static void gps_print_last_fix(bool json)
     else
     {
         printf(
-            "valid=%d lat=%.7f lon=%.7f sat=%d fixq=%d alt=%.1fm spd=%.2fkn crs=%.2fdeg age_ms=%u\n",
+            "valid=%d lat=%.7f lon=%.7f sat=%d/%d fixq=%d type=%d alt=%.1fm "
+            "hdop=%.1f pdop=%.1f vdop=%.1f spd=%.2fkn/%.1fkm/h crs=%.2fdeg age=%ums\n",
             snap.valid,
-            snap.lat,
-            snap.lon,
-            snap.satellites,
-            snap.fix_quality,
+            snap.lat, snap.lon,
+            snap.satellites, snap.sats_in_view,
+            snap.fix_quality, snap.fix_type,
             snap.altitude_m,
-            snap.speed_knots,
+            snap.hdop, snap.pdop, snap.vdop,
+            snap.speed_knots, snap.speed_kmph,
             snap.course_deg,
             (unsigned)age_ms);
     }
@@ -421,9 +504,15 @@ esp_err_t gps_get_fix(gps_fix_snapshot_t *out)
     out->lat            = s_fix.lat;
     out->lon            = s_fix.lon;
     out->satellites     = s_fix.satellites;
+    out->sats_in_view   = s_fix.sats_in_view;
     out->fix_quality    = s_fix.fix_quality;
+    out->fix_type       = s_fix.fix_type;
     out->altitude_m     = s_fix.altitude_m;
+    out->hdop           = s_fix.hdop;
+    out->pdop           = s_fix.pdop;
+    out->vdop           = s_fix.vdop;
     out->speed_knots    = s_fix.speed_knots;
+    out->speed_kmph     = s_fix.speed_kmph;
     out->course_deg     = s_fix.course_deg;
     out->last_update_ms = s_fix.last_update_ms;
 
@@ -437,6 +526,7 @@ static int cmd_gps(int argc, char **argv)
     bool opt_stream = false;
     bool opt_print = false;
     bool opt_json = false;
+    bool opt_passthru = false;
 
     for (int i = 1; i < argc; i++)
     {
@@ -452,11 +542,54 @@ static int cmd_gps(int argc, char **argv)
         {
             opt_json = true;
         }
+        else if (strcmp(argv[i], "-t") == 0)
+        {
+            opt_passthru = true;
+        }
         else
         {
-            printf("Usage: gps -p [-j] | gps -s\n");
+            printf("Usage: gps -p [-j] | gps -s | gps -t [0|1]\n");
             return 1;
         }
+    }
+
+    if (opt_passthru)
+    {
+        /* gps -t       → show current state
+         * gps -t 0|1   → set and persist */
+        int idx = -1;
+        for (int i = 1; i < argc; i++)
+        {
+            if (strcmp(argv[i], "-t") == 0 && i + 1 < argc)
+            {
+                idx = i + 1;
+                break;
+            }
+        }
+        if (idx < 0)
+        {
+            bool cur = false;
+            config_get_bool("GPS_PASSTHRU", &cur);
+            printf("GPS passthrough: %s\n", cur ? "enabled" : "disabled");
+            return 0;
+        }
+        int val = atoi(argv[idx]);
+        bool enable = (val != 0);
+        config_set_bool("GPS_PASSTHRU", enable);
+        config_save();
+        if (enable)
+        {
+            (void)gps_init(false);
+            gps_set_streaming(true);
+            usb_cli_console_set_gps_stream_mode(true);
+            printf("GPS passthrough enabled (persistent). Ctrl+C to exit.\n");
+        }
+        else
+        {
+            gps_set_streaming(false);
+            printf("GPS passthrough disabled.\n");
+        }
+        return 0;
     }
 
     if (opt_stream)
@@ -464,13 +597,13 @@ static int cmd_gps(int argc, char **argv)
         (void)gps_init(false);
         gps_set_streaming(true);
         usb_cli_console_set_gps_stream_mode(true);
-        printf("GPS stream mode. Send +++++++ (or =======) + Enter to exit stream mode.\n");
+        printf("GPS stream mode. Ctrl+C or +++ Enter to exit.\n");
         return 0;
     }
 
     if (!opt_print)
     {
-        printf("Usage: gps -p [-j] | gps -s\n");
+        printf("Usage: gps -p [-j] | gps -s | gps -t [0|1]\n");
         return 1;
     }
 
@@ -488,7 +621,7 @@ void gps_console_register(void)
 
     const esp_console_cmd_t cmd = {
         .command = "gps",
-        .help = "GPS helpers: gps -p [-j] prints last parsed fix (optional JSON), gps -s streams raw NMEA to console (exit with +++++++ or ======= + Enter)",
+        .help = "GPS: -p [-j] print fix, -s stream NMEA, -t [0|1] persistent passthrough",
         .hint = NULL,
         .func = &cmd_gps,
     };
