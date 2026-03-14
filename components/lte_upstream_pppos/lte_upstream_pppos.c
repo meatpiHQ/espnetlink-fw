@@ -23,6 +23,9 @@
 #include "esp_timer.h"
 #include "cJSON.h"
 
+#include <time.h>
+#include <sys/time.h>
+
 static const char *TAG = "lte_pppos";
 
 static EventGroupHandle_t s_evt;
@@ -52,6 +55,91 @@ static char s_saved_apn[64];
 static char s_saved_user[32];
 static char s_saved_pass[32];
 static char s_saved_pin[16];
+
+/* -----------------------------------------------------------------------
+ * System time synchronisation from modem (AT+QLTS=2)
+ * ----------------------------------------------------------------------- */
+
+static volatile bool s_time_synced = false;
+
+/**
+ * @brief Query modem for network time and set the ESP32 system clock.
+ *
+ * AT+QLTS=2 returns: +QLTS: "2025/06/14,12:34:56+32,0"
+ * where +32 is timezone in quarter-hours.  We convert to UTC and call
+ * settimeofday() so the whole system has a valid clock.
+ */
+static void lte_do_time_sync(void)
+{
+    if (!s_dce)
+    {
+        return;
+    }
+
+    char resp[128] = {0};
+    esp_err_t err = esp_modem_at(s_dce, "AT+QLTS=2", resp, 3000);
+    if (err != ESP_OK)
+    {
+        ESP_LOGW(TAG, "AT+QLTS=2 failed: %s", esp_err_to_name(err));
+        return;
+    }
+
+    ESP_LOGI(TAG, "QLTS response: %s", resp);
+
+    const char *p = strchr(resp, '"');
+    if (!p)
+    {
+        ESP_LOGW(TAG, "QLTS: no timestamp in response");
+        return;
+    }
+    p++;
+
+    int y, mo, d, h, mi, s, tz = 0;
+    int n = sscanf(p, "%d/%d/%d,%d:%d:%d%d", &y, &mo, &d, &h, &mi, &s, &tz);
+    if (n < 6)
+    {
+        ESP_LOGW(TAG, "QLTS: failed to parse time fields");
+        return;
+    }
+
+    struct tm tm_utc = {
+        .tm_year = y - 1900,
+        .tm_mon  = mo - 1,
+        .tm_mday = d,
+        .tm_hour = h,
+        .tm_min  = mi,
+        .tm_sec  = s,
+    };
+
+    /* tz is in quarter-hours from UTC; mktime expects UTC input */
+    time_t epoch = mktime(&tm_utc);
+    if (epoch == (time_t)-1)
+    {
+        ESP_LOGW(TAG, "QLTS: mktime failed");
+        return;
+    }
+
+    /* Subtract timezone offset to get UTC */
+    epoch -= (time_t)tz * 15 * 60;
+
+    struct timeval tv = { .tv_sec = epoch, .tv_usec = 0 };
+    settimeofday(&tv, NULL);
+    s_time_synced = true;
+
+    /* Log the resulting UTC time */
+    struct tm result;
+    gmtime_r(&epoch, &result);
+    ESP_LOGI(TAG, "System time set to UTC %04d-%02d-%02d %02d:%02d:%02d",
+             result.tm_year + 1900, result.tm_mon + 1, result.tm_mday,
+             result.tm_hour, result.tm_min, result.tm_sec);
+}
+
+static void lte_time_sync_task(void *arg)
+{
+    (void)arg;
+    lte_do_time_sync();
+    vTaskDelete(NULL);
+}
 
 /* Convert 3GPP TS 27.007 access-technology code to a short label */
 static const char *lte_act_to_str(int act)
@@ -467,6 +555,10 @@ static void on_ip_event(void *arg, esp_event_base_t event_base, int32_t event_id
             }
         }
 
+        /* Sync system clock from modem network time (runs in a short-lived
+         * task because AT commands block and event handlers must be fast) */
+        xTaskCreate(lte_time_sync_task, "lte_tsync", 3072, NULL, 5, NULL);
+
         if (s_evt)
         {
             xEventGroupClearBits(s_evt, BIT_DISCONNECTED);
@@ -587,6 +679,14 @@ static void lte_monitor_task(void *arg)
             EventBits_t bits = xEventGroupGetBits(s_evt);
             ppp_up = (bits & BIT_CONNECTED) && !(bits & BIT_DISCONNECTED);
             ESP_LOGI(TAG_MON, "PPP: %s", ppp_up ? "connected" : "disconnected");
+        }
+
+        /* Re-sync system time every ~60 s (alongside operator query) or
+         * on the very first poll to catch the case where GOT_IP fired
+         * before the modem had NITZ time available. */
+        if (!s_time_synced || poll_count % 4 == 1)
+        {
+            lte_do_time_sync();
         }
 
         /* Operator name & network type – query every 4th poll (~60 s) */
@@ -1251,6 +1351,35 @@ esp_err_t lte_upstream_pppos_get_status(lte_status_t *out)
     portEXIT_CRITICAL(&s_status_mux);
 
     return valid ? ESP_OK : ESP_ERR_INVALID_STATE;
+#endif
+}
+
+esp_err_t lte_upstream_pppos_send_at(const char *cmd, char *resp,
+                                     size_t resp_len, uint32_t timeout_ms)
+{
+#if !CONFIG_PPP_SUPPORT
+    (void)cmd; (void)resp; (void)resp_len; (void)timeout_ms;
+    return ESP_ERR_NOT_SUPPORTED;
+#else
+    if (!s_dce)
+    {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!resp || resp_len == 0)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    resp[0] = '\0';
+    return esp_modem_at(s_dce, cmd, resp, timeout_ms);
+#endif
+}
+
+bool lte_upstream_pppos_is_time_synced(void)
+{
+#if !CONFIG_PPP_SUPPORT
+    return false;
+#else
+    return s_time_synced;
 #endif
 }
 

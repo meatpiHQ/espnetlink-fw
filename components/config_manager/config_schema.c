@@ -32,6 +32,7 @@ const config_schema_entry_t g_config_schema[] =
     { "LTE_ENABLED",  CONFIG_TYPE_BOOL,     0,       NULL,         0,           true  },
     { "GPS_ENABLED",  CONFIG_TYPE_BOOL,     0,       NULL,         0,           true  },
     { "NCM_SHARE",    CONFIG_TYPE_BOOL,     0,       NULL,         0,           true  },
+    { "AGNSS_ENABLED",CONFIG_TYPE_BOOL,     0,       NULL,         0,           true  },
 };
 /* clang-format on */
 

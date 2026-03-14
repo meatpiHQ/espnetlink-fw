@@ -86,6 +86,30 @@ esp_err_t lte_upstream_pppos_stop(void);
 // Returns ESP_ERR_INVALID_STATE if the monitor has not yet run.
 esp_err_t lte_upstream_pppos_get_status(lte_status_t *out);
 
+/**
+ * Send a raw AT command to the modem and return the response.
+ *
+ * Requires CMUX mode (use_cmux=true) so an AT channel is available
+ * while PPP is running.  Thread-safe.
+ *
+ * @param cmd        AT command string (e.g. "AT+QLTS=2")
+ * @param resp       Buffer for response text (NUL-terminated)
+ * @param resp_len   Size of resp buffer
+ * @param timeout_ms Timeout in milliseconds
+ * @return ESP_OK on success, ESP_ERR_INVALID_STATE if DCE unavailable.
+ */
+esp_err_t lte_upstream_pppos_send_at(const char *cmd, char *resp,
+                                     size_t resp_len, uint32_t timeout_ms);
+
+/**
+ * @brief Check whether the system clock has been synchronised from modem
+ *        network time (AT+QLTS=2 / NITZ).
+ *
+ * @return true if settimeofday() has been called at least once with
+ *         a valid modem timestamp, false otherwise.
+ */
+bool lte_upstream_pppos_is_time_synced(void);
+
 // Register the `lte` console command. Called by usb_cli_console.
 void lte_upstream_pppos_console_register(void);
 

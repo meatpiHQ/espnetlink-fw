@@ -101,6 +101,7 @@ static void usb_cli_console_init_esp_console_once(void)
     imu_console_register();
     lte_upstream_pppos_console_register();
     config_manager_console_register();
+    agnss_console_register();
 
     s_esp_console_inited = true;
 }

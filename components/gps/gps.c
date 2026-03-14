@@ -1,4 +1,5 @@
 #include "gps.h"
+#include "agnss_internal.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -14,7 +15,11 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
+#include "config_manager.h"
 #include "hw_config.h"
+
+/* Internal AGNSS init — implemented in agnss.c (same component) */
+esp_err_t agnss_init(bool enabled);
 
 #include <nmea.h>
 #include <gpgga.h>
@@ -41,6 +46,12 @@ static volatile bool s_streaming = false;
 
 static SemaphoreHandle_t s_fix_lock;
 static gps_fix_t s_fix;
+
+/* Queue for $PAIR response lines intercepted by the parser task.
+ * Each item is a NUL-terminated string copied into a fixed-size buffer. */
+#define PAIR_RESP_QUEUE_LEN  4
+#define PAIR_RESP_MAX_LEN    160
+static QueueHandle_t s_pair_queue;
 
 static double gps_coord_to_decimal(int degrees, double minutes, char cardinal)
 {
@@ -174,6 +185,29 @@ static void gps_parser_task(void *arg)
                     printf("%s", sentence);
                 }
 
+                /* Intercept $PAIR responses and route to the queue */
+                if (strncmp(sentence, "$PAIR", 5) == 0)
+                {
+                    if (s_pair_queue)
+                    {
+                        char qbuf[PAIR_RESP_MAX_LEN];
+                        /* Strip trailing CR/LF for easier parsing */
+                        size_t cl = sidx;
+                        while (cl > 0 && (sentence[cl - 1] == '\r' ||
+                                          sentence[cl - 1] == '\n'))
+                        {
+                            cl--;
+                        }
+                        if (cl >= sizeof(qbuf))
+                        {
+                            cl = sizeof(qbuf) - 1;
+                        }
+                        memcpy(qbuf, sentence, cl);
+                        qbuf[cl] = '\0';
+                        xQueueSend(s_pair_queue, qbuf, 0);
+                    }
+                }
+
                 nmea_s *msg = nmea_parse(sentence, sidx, 0);
                 if (msg)
                 {
@@ -194,7 +228,7 @@ static void gps_parser_task(void *arg)
     }
 }
 
-esp_err_t gps_init(void)
+esp_err_t gps_init(bool enable_agnss)
 {
     if (s_inited)
     {
@@ -216,10 +250,48 @@ esp_err_t gps_init(void)
         return err;
     }
 
+    if (!s_pair_queue)
+    {
+        s_pair_queue = xQueueCreate(PAIR_RESP_QUEUE_LEN,
+                                    PAIR_RESP_MAX_LEN);
+    }
+
     xTaskCreate(gps_parser_task, "gps_parser", 4096, NULL, 4, NULL);
 
     s_inited = true;
+
+    /* Start AGNSS assistance if requested */
+    agnss_init(enable_agnss);
+
     return ESP_OK;
+}
+
+esp_err_t gps_pair_response_wait(char *out, size_t out_len, uint32_t timeout_ms)
+{
+    if (!out || out_len == 0)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_pair_queue)
+    {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    char qbuf[PAIR_RESP_MAX_LEN];
+    if (xQueueReceive(s_pair_queue, qbuf, pdMS_TO_TICKS(timeout_ms)) == pdTRUE)
+    {
+        strncpy(out, qbuf, out_len - 1);
+        out[out_len - 1] = '\0';
+        return ESP_OK;
+    }
+    return ESP_ERR_TIMEOUT;
+}
+
+esp_err_t gps_uart_write(const void *data, size_t len)
+{
+    int w = uart_write_bytes(GPS_UART_PORT, data, len);
+    uart_wait_tx_done(GPS_UART_PORT, pdMS_TO_TICKS(100));
+    return (w == (int)len) ? ESP_OK : ESP_FAIL;
 }
 
 void gps_set_streaming(bool enabled)
@@ -242,25 +314,68 @@ static void gps_print_last_fix(bool json)
         xSemaphoreGive(s_fix_lock);
     }
 
+    uint32_t now_ms = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+
+    bool agnss_enabled = false;
+    config_get_bool("AGNSS_ENABLED", &agnss_enabled);
+
+    bool time_inj = false, pos_inj = false;
+    agnss_get_status(&time_inj, &pos_inj);
+
+    double cached_lat = 0, cached_lon = 0, cached_alt = 0;
+    bool has_cached = (agnss_nvs_read_position(&cached_lat, &cached_lon,
+                                               &cached_alt) == ESP_OK);
+
     if (!snap.has_fix)
     {
-        printf("No GPS fix parsed yet.\n");
+        if (json)
+        {
+            printf("{\"valid\":false,\"has_fix\":false,"
+                   "\"agnss_enabled\":%s,\"time_injected\":%s,"
+                   "\"position_injected\":%s",
+                   agnss_enabled ? "true" : "false",
+                   time_inj ? "true" : "false",
+                   pos_inj ? "true" : "false");
+            if (has_cached)
+            {
+                printf(",\"cached_lat\":%.6f,\"cached_lon\":%.6f,"
+                       "\"cached_alt\":%.1f",
+                       cached_lat, cached_lon, cached_alt);
+            }
+            printf("}\n");
+        }
+        else
+        {
+            printf("No GPS fix parsed yet.\n");
+        }
         return;
     }
 
+    uint32_t age_ms = now_ms - snap.last_update_ms;
+
     if (json)
     {
-        printf(
-            "{\"valid\":%s,\"lat\":%.7f,\"lon\":%.7f,\"satellites\":%d,\"fix_quality\":%d,\"altitude_m\":%.1f,\"speed_knots\":%.2f,\"course_deg\":%.2f,\"last_update_ms\":%u}\n",
-            snap.valid ? "true" : "false",
-            snap.lat,
-            snap.lon,
-            snap.satellites,
-            snap.fix_quality,
-            snap.altitude_m,
-            snap.speed_knots,
-            snap.course_deg,
-            (unsigned)snap.last_update_ms);
+        printf("{\"valid\":%s,\"lat\":%.7f,\"lon\":%.7f,"
+               "\"satellites\":%d,\"fix_quality\":%d,"
+               "\"altitude_m\":%.1f,\"speed_knots\":%.2f,"
+               "\"course_deg\":%.2f,\"age_ms\":%u,"
+               "\"agnss_enabled\":%s,\"time_injected\":%s,"
+               "\"position_injected\":%s",
+               snap.valid ? "true" : "false",
+               snap.lat, snap.lon,
+               snap.satellites, snap.fix_quality,
+               snap.altitude_m, snap.speed_knots,
+               snap.course_deg, (unsigned)age_ms,
+               agnss_enabled ? "true" : "false",
+               time_inj ? "true" : "false",
+               pos_inj ? "true" : "false");
+        if (has_cached)
+        {
+            printf(",\"cached_lat\":%.6f,\"cached_lon\":%.6f,"
+                   "\"cached_alt\":%.1f",
+                   cached_lat, cached_lon, cached_alt);
+        }
+        printf("}\n");
     }
     else
     {
@@ -274,7 +389,7 @@ static void gps_print_last_fix(bool json)
             snap.altitude_m,
             snap.speed_knots,
             snap.course_deg,
-            (unsigned)((uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS) - snap.last_update_ms));
+            (unsigned)age_ms);
     }
 }
 
@@ -282,6 +397,39 @@ static void gps_print_last_fix(bool json)
 __attribute__((weak)) void usb_cli_console_set_gps_stream_mode(bool enabled)
 {
     (void)enabled;
+}
+
+esp_err_t gps_get_fix(gps_fix_snapshot_t *out)
+{
+    if (!out)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!s_fix_lock)
+    {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (xSemaphoreTake(s_fix_lock, pdMS_TO_TICKS(50)) != pdTRUE)
+    {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    out->has_fix        = s_fix.has_fix;
+    out->valid          = s_fix.valid;
+    out->lat            = s_fix.lat;
+    out->lon            = s_fix.lon;
+    out->satellites     = s_fix.satellites;
+    out->fix_quality    = s_fix.fix_quality;
+    out->altitude_m     = s_fix.altitude_m;
+    out->speed_knots    = s_fix.speed_knots;
+    out->course_deg     = s_fix.course_deg;
+    out->last_update_ms = s_fix.last_update_ms;
+
+    xSemaphoreGive(s_fix_lock);
+
+    return out->has_fix ? ESP_OK : ESP_ERR_INVALID_STATE;
 }
 
 static int cmd_gps(int argc, char **argv)
@@ -313,7 +461,7 @@ static int cmd_gps(int argc, char **argv)
 
     if (opt_stream)
     {
-        (void)gps_init();
+        (void)gps_init(false);
         gps_set_streaming(true);
         usb_cli_console_set_gps_stream_mode(true);
         printf("GPS stream mode. Send +++++++ (or =======) + Enter to exit stream mode.\n");
@@ -326,7 +474,7 @@ static int cmd_gps(int argc, char **argv)
         return 1;
     }
 
-    (void)gps_init();
+    (void)gps_init(false);
     gps_print_last_fix(opt_json);
     return 0;
 }

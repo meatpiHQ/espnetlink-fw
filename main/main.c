@@ -263,7 +263,9 @@ void app_main(void)
     config_manager_init();
 
     // Initialize GPS UART + parser task early so fix data is collected from boot
-    esp_err_t gps_err = gps_init();
+    bool agnss_enabled = true;
+    config_get_bool("AGNSS_ENABLED", &agnss_enabled);
+    esp_err_t gps_err = gps_init(agnss_enabled);
     if (gps_err != ESP_OK)
     {
         ESP_LOGE(TAG, "GPS init failed: %s", esp_err_to_name(gps_err));
