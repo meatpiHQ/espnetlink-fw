@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <sys/time.h>
 
 #include "esp_chip_info.h"
 #include "esp_console.h"
@@ -14,6 +16,7 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 
+#include "gps.h"
 #include "lte_upstream_pppos.h"
 
 #include "freertos/FreeRTOS.h"
@@ -112,8 +115,36 @@ static int usb_cli_cmd_system(int argc, char **argv)
 {
     if (argc < 2)
     {
-        printf("Usage: system -v | -i\n");
+        printf("Usage: system -v | -i | -s <unix_timestamp>\n");
         return 1;
+    }
+
+    if (strcmp(argv[1], "-s") == 0)
+    {
+        if (argc < 3)
+        {
+            printf("Usage: system -s <unix_timestamp>\n");
+            return 1;
+        }
+        long ts = atol(argv[2]);
+        if (ts <= 0)
+        {
+            printf("Invalid timestamp\n");
+            return 1;
+        }
+        struct timeval tv = { .tv_sec = ts, .tv_usec = 0 };
+        settimeofday(&tv, NULL);
+        lte_upstream_pppos_mark_time_synced();
+
+        struct tm utc;
+        time_t now = ts;
+        gmtime_r(&now, &utc);
+        printf("System time set to %04d-%02d-%02d %02d:%02d:%02d UTC\n",
+               utc.tm_year + 1900, utc.tm_mon + 1, utc.tm_mday,
+               utc.tm_hour, utc.tm_min, utc.tm_sec);
+
+        agnss_try_inject_time();
+        return 0;
     }
 
     if (strcmp(argv[1], "-v") == 0)
@@ -151,7 +182,7 @@ static int usb_cli_cmd_system(int argc, char **argv)
         return 0;
     }
 
-    printf("Usage: system -v | -i\n");
+    printf("Usage: system -v | -i | -s <unix_timestamp>\n");
     return 1;
 }
 
@@ -512,8 +543,8 @@ void usb_cli_register_console_commands(void)
 
     const esp_console_cmd_t cmd_system = {
         .command = "system",
-        .help    = "System info: -v (version), -i (device info)",
-        .hint    = "-v | -i",
+        .help    = "System info/control: -v (version), -i (device info), -s <ts> (set time)",
+        .hint    = "-v | -i | -s <unix_ts>",
         .func    = &usb_cli_cmd_system,
     };
     (void)esp_console_cmd_register(&cmd_system);

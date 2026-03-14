@@ -75,6 +75,13 @@ void gps_console_register(void);
 esp_err_t agnss_save_easy_data(void);
 
 /**
+ * Attempt to inject reference time into the LC76G now.
+ * Succeeds only if the system clock is marked as synced.
+ * Safe to call even if time was already injected (no-op in that case).
+ */
+esp_err_t agnss_try_inject_time(void);
+
+/**
  * Register the `agnss` CLI command.
  * Called by usb_cli_console during console initialisation.
  */

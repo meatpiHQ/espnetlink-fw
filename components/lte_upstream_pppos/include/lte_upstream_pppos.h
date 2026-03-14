@@ -110,6 +110,11 @@ esp_err_t lte_upstream_pppos_send_at(const char *cmd, char *resp,
  */
 bool lte_upstream_pppos_is_time_synced(void);
 
+/**
+ * @brief Mark system time as synchronised (e.g. after a manual settimeofday).
+ */
+void lte_upstream_pppos_mark_time_synced(void);
+
 // Register the `lte` console command. Called by usb_cli_console.
 void lte_upstream_pppos_console_register(void);
 

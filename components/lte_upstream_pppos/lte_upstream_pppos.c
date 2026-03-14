@@ -1383,6 +1383,13 @@ bool lte_upstream_pppos_is_time_synced(void)
 #endif
 }
 
+void lte_upstream_pppos_mark_time_synced(void)
+{
+#if CONFIG_PPP_SUPPORT
+    s_time_synced = true;
+#endif
+}
+
 /* -----------------------------------------------------------------------
  * PSM T3412/T3324 timer decoder (3GPP TS 24.008 Table 10.5.163a/172)
  * Input : 8-char binary string e.g. "00100001"

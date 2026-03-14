@@ -323,6 +323,25 @@ esp_err_t agnss_save_easy_data(void)
 }
 
 /* -----------------------------------------------------------------------
+ * Manual time injection trigger (called from CLI / external)
+ * ----------------------------------------------------------------------- */
+
+esp_err_t agnss_try_inject_time(void)
+{
+    if (s_time_injected)
+    {
+        return ESP_OK;
+    }
+    esp_err_t err = inject_reference_time();
+    if (err == ESP_OK)
+    {
+        s_time_injected = true;
+        ESP_LOGI(TAG, "Reference time injected (manual trigger)");
+    }
+    return err;
+}
+
+/* -----------------------------------------------------------------------
  * Position cache task
  * ----------------------------------------------------------------------- */
 
