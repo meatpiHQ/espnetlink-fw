@@ -48,6 +48,8 @@ static lte_status_t s_status;   /* protected by s_status_mux */
 /* --- reconnect supervisor --- */
 static TaskHandle_t s_supervisor_task = NULL;
 static volatile bool s_supervisor_running = false;
+static volatile bool s_stop_requested = false;
+static volatile bool s_start_in_progress = false;
 
 /* Deep-copied config strings for use on reconnect */
 static lte_upstream_pppos_config_t s_saved_cfg;
@@ -430,6 +432,12 @@ static esp_err_t wait_for_cellular_attach(esp_modem_dce_t *dce, uint32_t timeout
     int poll_count = 0;
     while ((esp_timer_get_time() / 1000) < deadline)
     {
+        if (s_stop_requested)
+        {
+            ESP_LOGW(TAG, "LTE attach cancelled by stop request");
+            return ESP_ERR_INVALID_STATE;
+        }
+
         int rssi = 0, ber = 0;
         (void)esp_modem_get_signal_quality(dce, &rssi, &ber);
 
@@ -1249,11 +1257,13 @@ esp_err_t lte_upstream_pppos_start(const lte_upstream_pppos_config_t *cfg)
     (void)cfg;
     return ESP_ERR_NOT_SUPPORTED;
 #else
-    if (s_dce || s_netif_ppp || s_supervisor_task)
+    if (s_dce || s_netif_ppp || s_supervisor_task || s_start_in_progress)
     {
         return ESP_ERR_INVALID_STATE;
     }
 
+    s_stop_requested = false;
+    s_start_in_progress = true;
     lte_save_config(cfg);
 
     /* Configure LED_RED_PIN as output, start with LED off (active-low) */
@@ -1262,6 +1272,13 @@ esp_err_t lte_upstream_pppos_start(const lte_upstream_pppos_config_t *cfg)
     gpio_set_level(LED_RED_PIN, 1);
 
     esp_err_t err = lte_inner_start(cfg);
+    s_start_in_progress = false;
+    if (s_stop_requested)
+    {
+        ESP_LOGI(TAG, "LTE start aborted by stop request");
+        return ESP_ERR_INVALID_STATE;
+    }
+
     if (err != ESP_OK)
     {
         /* lte_inner_stop() was already called inside lte_inner_start on failure.
@@ -1318,6 +1335,18 @@ esp_err_t lte_upstream_pppos_stop(void)
 #if !CONFIG_PPP_SUPPORT
     return ESP_ERR_NOT_SUPPORTED;
 #else
+    s_stop_requested = true;
+
+    for (int i = 0; i < 50 && s_start_in_progress; i++)
+    {
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    if (s_start_in_progress)
+    {
+        ESP_LOGW(TAG, "Timed out waiting for LTE startup to stop");
+        return ESP_ERR_TIMEOUT;
+    }
+
     /* Signal supervisor to exit and wait up to 4 s before force-killing */
     s_supervisor_running = false;
     for (int i = 0; i < 40 && s_supervisor_task != NULL; i++)
@@ -1331,6 +1360,7 @@ esp_err_t lte_upstream_pppos_stop(void)
     }
 
     lte_inner_stop();
+    s_stop_requested = false;
     return ESP_OK;
 #endif
 }

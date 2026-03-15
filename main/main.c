@@ -7,6 +7,7 @@
 #include <assert.h>
 
 #include "esp_log.h"
+#include "esp_sleep.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -200,6 +201,28 @@ static void iface_tx_task(void *arg)
 
 void app_main(void)
 {
+
+    // Log reset and wakeup reason at boot time, before any long startup delays.
+    esp_sleep_wakeup_cause_t wakeup = esp_sleep_get_wakeup_cause();
+    esp_reset_reason_t reset_reason = esp_reset_reason();
+    ESP_LOGW("main", "Reset reason: %d", (int)reset_reason);
+    if (wakeup != ESP_SLEEP_WAKEUP_UNDEFINED)
+    {
+        const char *reason = "unknown";
+        switch (wakeup)
+        {
+        case ESP_SLEEP_WAKEUP_EXT0:      reason = "EXT0";      break;
+        case ESP_SLEEP_WAKEUP_EXT1:      reason = "EXT1";      break;
+        case ESP_SLEEP_WAKEUP_TIMER:     reason = "TIMER";     break;
+        case ESP_SLEEP_WAKEUP_TOUCHPAD:  reason = "TOUCHPAD";  break;
+        case ESP_SLEEP_WAKEUP_ULP:       reason = "ULP";       break;
+        case ESP_SLEEP_WAKEUP_GPIO:      reason = "GPIO";      break;
+        default: break;
+        }
+        ESP_LOGW("main", "Woke from deep sleep, cause: %s (%d)", reason, (int)wakeup);
+    }
+
+
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());

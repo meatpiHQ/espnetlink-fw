@@ -13,16 +13,22 @@
 #include "esp_idf_version.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "esp_rom_sys.h"
 #include "esp_sleep.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 
 #include "driver/gpio.h"
 #include "driver/rtc_io.h"
+#include "esp_private/periph_ctrl.h"
+#include "soc/periph_defs.h"
 #include "hw_config.h"
 
 #include "gps.h"
+#include "imu.h"
 #include "lte_upstream_pppos.h"
+#include "usb_cli_console.h"
+#include "usbd_core.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -521,6 +527,41 @@ static int usb_cli_cmd_speedtest(int argc, char **argv)
 // ---------------------------------------------------------------------------
 
 static volatile bool s_sleep_mode_active = false;
+static volatile bool s_deep_sleep_pending = false;
+static volatile int s_deep_sleep_mode = 0;
+static volatile uint8_t s_deep_sleep_wom_threshold = 50;
+
+enum {
+    DEEP_SLEEP_MODE_NONE = 0,
+    DEEP_SLEEP_MODE_BASIC = 2,
+    DEEP_SLEEP_MODE_WAKE_GPIO = 3,
+    DEEP_SLEEP_MODE_IMU_WOM = 4,
+};
+
+static esp_err_t sleep_reset_wakeup_sources(void)
+{
+    esp_err_t err = esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+    if (err != ESP_OK)
+    {
+        printf("Failed to clear wakeup sources: %s\n", esp_err_to_name(err));
+        return err;
+    }
+
+    return ESP_OK;
+}
+
+static void usb_shutdown_and_deep_sleep(void)
+{
+    printf("Sleeping now.\n\n\n");
+    vTaskDelay(pdMS_TO_TICKS(300));  // flush USB output
+
+    // Deep sleep powers the USB block down automatically.
+    // Explicit USB teardown here can panic because the console stack is still active.
+    esp_rom_printf(">>> entering deep sleep\n");
+    esp_deep_sleep_start();
+    // Should never reach here
+    esp_rom_printf(">>> deep sleep FAILED!\n");
+}
 
 static void sleep_power_off_peripherals(void)
 {
@@ -576,16 +617,117 @@ static void sleep_power_off_peripherals(void)
     gpio_set_level(LED_GPIO, 0);
 }
 
+static esp_err_t prepare_mode_specific_wakeup(void)
+{
+    if (s_deep_sleep_mode == DEEP_SLEEP_MODE_WAKE_GPIO)
+    {
+        gpio_set_direction(USB_SEL_1, GPIO_MODE_OUTPUT);
+        gpio_set_level(USB_SEL_1, 0);
+        gpio_sleep_set_pull_mode(USB_SEL_1, GPIO_PULLDOWN_ONLY);
+        gpio_pulldown_en(USB_SEL_1);
+        rtc_gpio_pulldown_en(USB_SEL_1);
+        gpio_hold_en(USB_SEL_1);
+
+        rtc_gpio_init(WAKE_GPIO);
+        rtc_gpio_set_direction(WAKE_GPIO, RTC_GPIO_MODE_INPUT_ONLY);
+        rtc_gpio_pulldown_dis(WAKE_GPIO);
+        rtc_gpio_pullup_en(WAKE_GPIO);
+        return esp_sleep_enable_ext1_wakeup_io(1ULL << WAKE_GPIO,
+                                               ESP_EXT1_WAKEUP_ANY_LOW);
+    }
+
+    if (s_deep_sleep_mode == DEEP_SLEEP_MODE_IMU_WOM)
+    {
+        esp_rom_printf(">>> configuring WOM (%u mg)\n", (unsigned)s_deep_sleep_wom_threshold);
+
+        esp_err_t err = imu_configure_wom(s_deep_sleep_wom_threshold);
+        if (err != ESP_OK)
+        {
+            return err;
+        }
+
+        err = imu_prepare_wom_sleep();
+        if (err != ESP_OK)
+        {
+            return err;
+        }
+
+        esp_rom_printf(">>> arming IMU EXT0 wake\n");
+        rtc_gpio_init(IMU_INT_PIN);
+        rtc_gpio_set_direction(IMU_INT_PIN, RTC_GPIO_MODE_INPUT_ONLY);
+        rtc_gpio_pullup_dis(IMU_INT_PIN);
+        rtc_gpio_pulldown_en(IMU_INT_PIN);
+        esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
+        return esp_sleep_enable_ext0_wakeup(IMU_INT_PIN, 1);
+    }
+
+    return ESP_OK;
+}
+
+static void deep_sleep_worker_task(void *arg)
+{
+    (void)arg;
+
+    usb_cli_console_set_enabled(false);
+    vTaskDelay(pdMS_TO_TICKS(250));
+
+    sleep_power_off_peripherals();
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    esp_rom_printf(">>> preparing wake source\n");
+    esp_err_t err = prepare_mode_specific_wakeup();
+    if (err != ESP_OK)
+    {
+        s_deep_sleep_pending = false;
+        s_deep_sleep_mode = DEEP_SLEEP_MODE_NONE;
+        esp_rom_printf(">>> deep sleep aborted: %s\n", esp_err_to_name(err));
+        vTaskDelete(NULL);
+        return;
+    }
+
+    usb_shutdown_and_deep_sleep();
+    vTaskDelete(NULL);
+}
+
+static int start_deep_sleep_worker(int mode)
+{
+    if (s_deep_sleep_pending)
+    {
+        printf("Deep sleep is already pending\n");
+        return 1;
+    }
+
+    s_deep_sleep_pending = true;
+    s_deep_sleep_mode = mode;
+    BaseType_t created = xTaskCreate(deep_sleep_worker_task,
+                                     "deep_sleep",
+                                     4096,
+                                     NULL,
+                                     9,
+                                     NULL);
+    if (created != pdPASS)
+    {
+        s_deep_sleep_pending = false;
+        s_deep_sleep_mode = DEEP_SLEEP_MODE_NONE;
+        printf("Failed to create deep sleep task\n");
+        return 1;
+    }
+
+    return 0;
+}
+
 static int usb_cli_cmd_sleep(int argc, char **argv)
 {
     if (argc < 2)
     {
-        printf("Usage: sleep <mode> [seconds]\n");
-        printf("  sleep 1          - Light sleep: power off GPS/LTE, keep USB active\n");
-        printf("                     Wake with 'wake' command\n");
-        printf("  sleep 2 [secs]   - Deep sleep: power off everything including USB\n");
-        printf("                     Wake on timer (if secs given) or reset button\n");
-        printf("  sleep 3          - Deep sleep: USB mux off, wake on WAKE_GPIO\n");
+        printf("Usage: sleep <mode> [args]\n");
+        printf("  sleep 1            - Light sleep: power off GPS/LTE, keep USB active\n");
+        printf("                       Wake with 'wake' command\n");
+        printf("  sleep 2 [secs]     - Deep sleep: power off everything including USB\n");
+        printf("                       Wake on timer (if secs given) or reset button\n");
+        printf("  sleep 3            - Deep sleep: USB mux off, wake on WAKE_GPIO\n");
+        printf("  sleep 4 [thresh]   - Deep sleep: wake on motion (IMU)\n");
+        printf("                       thresh = WOM threshold in mg (1-255, default 50)\n");
         return 1;
     }
 
@@ -603,6 +745,11 @@ static int usb_cli_cmd_sleep(int argc, char **argv)
     if (mode == 2)
     {
         uint64_t sleep_us = 0;
+        if (sleep_reset_wakeup_sources() != ESP_OK)
+        {
+            return 1;
+        }
+
         if (argc >= 3)
         {
             long secs = atol(argv[2]);
@@ -620,48 +767,49 @@ static int usb_cli_cmd_sleep(int argc, char **argv)
             printf("Entering deep sleep (wake on reset only)...\n");
         }
 
-        sleep_power_off_peripherals();
-        vTaskDelay(pdMS_TO_TICKS(500));  // flush output
-
-        printf("Sleeping now.\n\n\n");
-        vTaskDelay(pdMS_TO_TICKS(200));  // let last message flush
-
-        esp_deep_sleep_start();
-        // Does not return
-        return 0;
+        return start_deep_sleep_worker(DEEP_SLEEP_MODE_BASIC);
     }
 
     if (mode == 3)
     {
         printf("Entering deep sleep (USB mux off, wake on WAKE_GPIO)...\n");
 
-        sleep_power_off_peripherals();
+        if (sleep_reset_wakeup_sources() != ESP_OK)
+        {
+            return 1;
+        }
 
-        // Disconnect USB mux and hold LOW during deep sleep
-        gpio_set_direction(USB_SEL_1, GPIO_MODE_OUTPUT);
-        gpio_set_level(USB_SEL_1, 0);
-        gpio_sleep_set_pull_mode(USB_SEL_1, GPIO_PULLDOWN_ONLY);
-        gpio_pulldown_en(USB_SEL_1);
-        rtc_gpio_pulldown_en(USB_SEL_1);
-        gpio_hold_en(USB_SEL_1);
-        vTaskDelay(pdMS_TO_TICKS(2000));
-
-        // Configure WAKE_GPIO as deep sleep wakeup source (wake on LOW)
-        rtc_gpio_init(WAKE_GPIO);
-        rtc_gpio_set_direction(WAKE_GPIO, RTC_GPIO_MODE_INPUT_ONLY);
-        rtc_gpio_pulldown_dis(WAKE_GPIO);
-        rtc_gpio_pullup_en(WAKE_GPIO);
-        esp_sleep_enable_ext1_wakeup_io(1ULL << WAKE_GPIO,
-                                        ESP_EXT1_WAKEUP_ALL_LOW);
-
-        printf("Sleeping now.\n\n\n");
-        vTaskDelay(pdMS_TO_TICKS(200));
-
-        esp_deep_sleep_start();
-        return 0;
+        return start_deep_sleep_worker(DEEP_SLEEP_MODE_WAKE_GPIO);
     }
 
-    printf("Unknown mode %d. Use 1, 2, or 3.\n", mode);
+    if (mode == 4)
+    {
+        uint8_t threshold = 50;  // default 50 mg
+        if (argc >= 3)
+        {
+            int val = atoi(argv[2]);
+            if (val < 1 || val > 255)
+            {
+                printf("Threshold must be 1-255 mg\n");
+                return 1;
+            }
+            threshold = (uint8_t)val;
+        }
+
+        printf("Configuring IMU wake-on-motion (threshold=%u mg)...\n", threshold);
+        if (sleep_reset_wakeup_sources() != ESP_OK)
+        {
+            return 1;
+        }
+
+        printf("Entering deep sleep (wake on motion)...\n");
+
+        s_deep_sleep_wom_threshold = threshold;
+
+        return start_deep_sleep_worker(DEEP_SLEEP_MODE_IMU_WOM);
+    }
+
+    printf("Unknown mode %d. Use 1, 2, 3, or 4.\n", mode);
     return 1;
 }
 

@@ -39,4 +39,5 @@
 #define I2C_MASTER_SCL_IO     GPIO_NUM_47
 #define I2C_MASTER_SDA_IO     GPIO_NUM_48
 
+#define IMU_INT_PIN           GPIO_NUM_21
 #endif // HW_CONFIG_H
