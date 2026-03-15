@@ -8,6 +8,7 @@
 #define LED_GPIO               GPIO_NUM_2
 #define USB_SEL_1              GPIO_NUM_12
 #define USB_SEL_2              GPIO_NUM_10
+#define WAKE_GPIO              GPIO_NUM_1
 
 // GPS
 #define GPS_UART_PORT          UART_NUM_2

@@ -13,8 +13,13 @@
 #include "esp_idf_version.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "esp_sleep.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+
+#include "driver/gpio.h"
+#include "driver/rtc_io.h"
+#include "hw_config.h"
 
 #include "gps.h"
 #include "lte_upstream_pppos.h"
@@ -512,6 +517,172 @@ static int usb_cli_cmd_speedtest(int argc, char **argv)
 }
 
 // ---------------------------------------------------------------------------
+// Sleep / Wake
+// ---------------------------------------------------------------------------
+
+static volatile bool s_sleep_mode_active = false;
+
+static void sleep_power_off_peripherals(void)
+{
+    // Stop LTE PPPoS stack and power off modem
+    printf("Stopping LTE stack...\n");
+    (void)lte_upstream_pppos_stop();
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    // Ensure STATUS pin is configured as input before reading
+    gpio_reset_pin(LTE_STATUS_PIN);
+    gpio_set_direction(LTE_STATUS_PIN, GPIO_MODE_INPUT);
+
+    // Ensure PWR_KEY is configured as output
+    gpio_reset_pin(LTE_PWR_KEY_PIN);
+    gpio_set_direction(LTE_PWR_KEY_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_level(LTE_PWR_KEY_PIN, 0);
+
+    // Check if modem is already off
+    if (gpio_get_level(LTE_STATUS_PIN) != 0)
+    {
+        printf("LTE modem already OFF\n");
+    }
+    else
+    {
+        // Graceful modem power-off: 1500ms PWR_KEY pulse
+        printf("Powering off LTE modem...\n");
+        gpio_set_level(LTE_PWR_KEY_PIN, 1);
+        vTaskDelay(pdMS_TO_TICKS(1500));
+        gpio_set_level(LTE_PWR_KEY_PIN, 0);
+
+        // Wait for STATUS pin to go HIGH (modem OFF), up to 30s
+        for (int i = 0; i < 60; i++)
+        {
+            if (gpio_get_level(LTE_STATUS_PIN) != 0)
+            {
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(500));
+        }
+        printf("LTE modem %s\n",
+               gpio_get_level(LTE_STATUS_PIN) != 0 ? "OFF" : "still on (timeout)");
+    }
+
+    // Power off GPS module
+    printf("Powering off GPS...\n");
+    gpio_set_level(GPS_PWR_EN_PIN, 0);
+
+    // Turn off LEDs
+    gpio_set_level(LED_RED_PIN, 1);  // active-low: HIGH = OFF
+
+    gpio_reset_pin(LED_GPIO);
+    gpio_set_direction(LED_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_level(LED_GPIO, 0);
+}
+
+static int usb_cli_cmd_sleep(int argc, char **argv)
+{
+    if (argc < 2)
+    {
+        printf("Usage: sleep <mode> [seconds]\n");
+        printf("  sleep 1          - Light sleep: power off GPS/LTE, keep USB active\n");
+        printf("                     Wake with 'wake' command\n");
+        printf("  sleep 2 [secs]   - Deep sleep: power off everything including USB\n");
+        printf("                     Wake on timer (if secs given) or reset button\n");
+        printf("  sleep 3          - Deep sleep: USB mux off, wake on WAKE_GPIO\n");
+        return 1;
+    }
+
+    const int mode = atoi(argv[1]);
+
+    if (mode == 1)
+    {
+        printf("Entering low-power mode (USB active)...\n");
+        sleep_power_off_peripherals();
+        s_sleep_mode_active = true;
+        printf("Low-power mode active. Type 'wake' to restore.\n");
+        return 0;
+    }
+
+    if (mode == 2)
+    {
+        uint64_t sleep_us = 0;
+        if (argc >= 3)
+        {
+            long secs = atol(argv[2]);
+            if (secs <= 0)
+            {
+                printf("Invalid duration\n");
+                return 1;
+            }
+            sleep_us = (uint64_t)secs * 1000000ULL;
+            printf("Entering deep sleep for %ld seconds...\n", secs);
+            esp_sleep_enable_timer_wakeup(sleep_us);
+        }
+        else
+        {
+            printf("Entering deep sleep (wake on reset only)...\n");
+        }
+
+        sleep_power_off_peripherals();
+        vTaskDelay(pdMS_TO_TICKS(500));  // flush output
+
+        printf("Sleeping now.\n\n\n");
+        vTaskDelay(pdMS_TO_TICKS(200));  // let last message flush
+
+        esp_deep_sleep_start();
+        // Does not return
+        return 0;
+    }
+
+    if (mode == 3)
+    {
+        printf("Entering deep sleep (USB mux off, wake on WAKE_GPIO)...\n");
+
+        sleep_power_off_peripherals();
+
+        // Disconnect USB mux and hold LOW during deep sleep
+        gpio_set_direction(USB_SEL_1, GPIO_MODE_OUTPUT);
+        gpio_set_level(USB_SEL_1, 0);
+        gpio_sleep_set_pull_mode(USB_SEL_1, GPIO_PULLDOWN_ONLY);
+        gpio_pulldown_en(USB_SEL_1);
+        rtc_gpio_pulldown_en(USB_SEL_1);
+        gpio_hold_en(USB_SEL_1);
+        vTaskDelay(pdMS_TO_TICKS(2000));
+
+        // Configure WAKE_GPIO as deep sleep wakeup source (wake on LOW)
+        rtc_gpio_init(WAKE_GPIO);
+        rtc_gpio_set_direction(WAKE_GPIO, RTC_GPIO_MODE_INPUT_ONLY);
+        rtc_gpio_pulldown_dis(WAKE_GPIO);
+        rtc_gpio_pullup_en(WAKE_GPIO);
+        esp_sleep_enable_ext1_wakeup_io(1ULL << WAKE_GPIO,
+                                        ESP_EXT1_WAKEUP_ALL_LOW);
+
+        printf("Sleeping now.\n\n\n");
+        vTaskDelay(pdMS_TO_TICKS(200));
+
+        esp_deep_sleep_start();
+        return 0;
+    }
+
+    printf("Unknown mode %d. Use 1, 2, or 3.\n", mode);
+    return 1;
+}
+
+static int usb_cli_cmd_wake(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    if (!s_sleep_mode_active)
+    {
+        printf("Device is not in sleep mode\n");
+        return 1;
+    }
+
+    printf("Waking up — rebooting to re-initialize peripherals...\n");
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
 
@@ -572,4 +743,20 @@ void usb_cli_register_console_commands(void)
         .func    = &usb_cli_cmd_ping,
     };
     (void)esp_console_cmd_register(&cmd_ping);
+
+    const esp_console_cmd_t cmd_sleep = {
+        .command = "sleep",
+        .help    = "Enter low-power mode. 1=USB active, 2=deep sleep (timer/reset), 3=deep sleep (GPIO wake)",
+        .hint    = "<1|2|3> [seconds]",
+        .func    = &usb_cli_cmd_sleep,
+    };
+    (void)esp_console_cmd_register(&cmd_sleep);
+
+    const esp_console_cmd_t cmd_wake = {
+        .command = "wake",
+        .help    = "Wake from sleep mode 1 (reboots to re-init peripherals)",
+        .hint    = NULL,
+        .func    = &usb_cli_cmd_wake,
+    };
+    (void)esp_console_cmd_register(&cmd_wake);
 }
