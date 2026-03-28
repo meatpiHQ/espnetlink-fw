@@ -128,6 +128,7 @@ esp_err_t config_set_from_str(const char *key, const char *value_str);
  *
  * Call once from the console init path (e.g. usb_cli_console).
  * Provides: config get <KEY>  |  config set <KEY> <VALUE>  |
- *           config list        |  config reset
+ *           config list [-j]   |  config -l [-j]          |
+ *           config reset
  */
 void config_manager_console_register(void);

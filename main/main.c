@@ -237,6 +237,19 @@ void app_main(void)
 	gpio_set_direction(USB_SEL_2, GPIO_MODE_INPUT);
 	gpio_set_pull_mode(USB_SEL_2, GPIO_FLOATING);
 
+    gpio_reset_pin(BUTTON_GPIO);
+	gpio_set_direction(BUTTON_GPIO, GPIO_MODE_INPUT);
+	gpio_set_pull_mode(BUTTON_GPIO, GPIO_PULLUP_ONLY);
+
+    if(gpio_get_level(BUTTON_GPIO) == 0)
+    {
+        ESP_LOGI(TAG, "BOOT button held at startup: entering flash mode");
+        while (1)
+        {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+    }
+
     if (gpio_get_level(USB_SEL_2) == 1)
     {
         ESP_LOGI(TAG, "USB_SEL_2 is HIGH: checking modem state");

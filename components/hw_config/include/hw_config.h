@@ -9,6 +9,7 @@
 #define USB_SEL_1              GPIO_NUM_12
 #define USB_SEL_2              GPIO_NUM_10
 #define WAKE_GPIO              GPIO_NUM_1
+#define BUTTON_GPIO            GPIO_NUM_11
 
 // GPS
 #define GPS_UART_PORT          UART_NUM_2
