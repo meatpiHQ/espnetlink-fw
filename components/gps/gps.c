@@ -55,6 +55,10 @@ static bool s_cmd_registered = false;
 
 static volatile bool s_streaming = false;
 
+#define GPS_UART_RX_BUFFER_SIZE   16384
+#define GPS_PARSER_TASK_STACK     4096
+#define GPS_PARSER_TASK_PRIO      8
+
 static SemaphoreHandle_t s_fix_lock;
 static gps_fix_t s_fix;
 
@@ -67,6 +71,7 @@ static QueueHandle_t s_pair_queue;
 /* Event group bit: set by parser task whenever UART data is received */
 #define GPS_EVT_UART_RX  BIT0
 static EventGroupHandle_t s_gps_evt;
+static TaskHandle_t s_gps_parser_task;
 
 static double gps_coord_to_decimal(int degrees, double minutes, char cardinal)
 {
@@ -197,7 +202,8 @@ static esp_err_t gps_uart_setup_once(void)
         .source_clk = UART_SCLK_DEFAULT,
     };
 
-    esp_err_t err = uart_driver_install(GPS_UART_PORT, 8192, 0, 0, NULL, 0);
+    esp_err_t err = uart_driver_install(GPS_UART_PORT, GPS_UART_RX_BUFFER_SIZE,
+                                        0, 0, NULL, ESP_INTR_FLAG_IRAM);
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE)
     {
         return err;
@@ -347,7 +353,19 @@ esp_err_t gps_init(bool enable_agnss)
         s_gps_evt = xEventGroupCreate();
     }
 
-    xTaskCreate(gps_parser_task, "gps_parser", 4096, NULL, 4, NULL);
+    BaseType_t task_ok;
+#if CONFIG_FREERTOS_UNICORE
+    task_ok = xTaskCreate(gps_parser_task, "gps_parser", GPS_PARSER_TASK_STACK,
+                          NULL, GPS_PARSER_TASK_PRIO, &s_gps_parser_task);
+#else
+    task_ok = xTaskCreatePinnedToCore(gps_parser_task, "gps_parser",
+                                      GPS_PARSER_TASK_STACK, NULL,
+                                      GPS_PARSER_TASK_PRIO, &s_gps_parser_task, 1);
+#endif
+    if (task_ok != pdPASS)
+    {
+        return ESP_ERR_NO_MEM;
+    }
 
     s_inited = true;
 

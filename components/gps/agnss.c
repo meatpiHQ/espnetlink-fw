@@ -28,6 +28,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 
 #include "gps.h"
@@ -41,6 +42,118 @@ static const char *TAG = "agnss";
 
 static volatile bool s_time_injected = false;
 static volatile bool s_position_injected = false;
+static SemaphoreHandle_t s_pair_lock;
+
+#define AGNSS_GPS_READY_WAIT_MS          30000
+#define AGNSS_GPS_READY_POLL_MS           1000
+#define AGNSS_GPS_PAIR_READY_DELAY_MS     1000
+#define AGNSS_GPS_READY_SETTLE_MS          500
+#define AGNSS_INIT_STEP_RETRY_MS         30000
+#define AGNSS_INIT_STEP_RETRY_DELAY_MS    2000
+
+static esp_err_t agnss_pair_lock_take(TickType_t timeout_ticks)
+{
+    if (!s_pair_lock)
+    {
+        s_pair_lock = xSemaphoreCreateMutex();
+        if (!s_pair_lock)
+        {
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
+    return (xSemaphoreTake(s_pair_lock, timeout_ticks) == pdTRUE) ? ESP_OK : ESP_ERR_TIMEOUT;
+}
+
+static void agnss_pair_lock_give(void)
+{
+    if (s_pair_lock)
+    {
+        xSemaphoreGive(s_pair_lock);
+    }
+}
+
+static esp_err_t wait_for_gps_ready(uint32_t timeout_ms)
+{
+    int64_t start_ms = esp_timer_get_time() / 1000;
+    int64_t deadline_ms = start_ms + timeout_ms;
+    int64_t first_uart_ms = -1;
+
+    ESP_LOGI(TAG, "Waiting for GPS UART traffic before AGNSS init...");
+
+    while ((esp_timer_get_time() / 1000) < deadline_ms)
+    {
+        int64_t now_ms = esp_timer_get_time() / 1000;
+        uint32_t remaining_ms = (uint32_t)(deadline_ms - now_ms);
+        if (remaining_ms == 0)
+        {
+            break;
+        }
+
+        uint32_t poll_ms = AGNSS_GPS_READY_POLL_MS;
+        if (remaining_ms < poll_ms)
+        {
+            poll_ms = remaining_ms;
+        }
+
+        if (gps_is_functional(poll_ms))
+        {
+            if (first_uart_ms < 0)
+            {
+                first_uart_ms = esp_timer_get_time() / 1000;
+                ESP_LOGI(TAG, "GPS UART traffic detected; waiting %u ms for PAIR readiness",
+                         (unsigned)AGNSS_GPS_PAIR_READY_DELAY_MS);
+            }
+        }
+
+        if (first_uart_ms >= 0)
+        {
+            now_ms = esp_timer_get_time() / 1000;
+            if ((now_ms - first_uart_ms) >= AGNSS_GPS_PAIR_READY_DELAY_MS)
+            {
+                ESP_LOGI(TAG, "GPS PAIR readiness delay elapsed; continuing AGNSS init");
+                vTaskDelay(pdMS_TO_TICKS(AGNSS_GPS_READY_SETTLE_MS));
+                return ESP_OK;
+            }
+        }
+    }
+
+    ESP_LOGW(TAG, "GPS UART not active after %u ms", (unsigned)timeout_ms);
+    return ESP_ERR_TIMEOUT;
+}
+
+static esp_err_t retry_init_step(const char *step_name,
+                                 esp_err_t (*step_fn)(void),
+                                 uint32_t timeout_ms,
+                                 bool retry_if_no_data)
+{
+    esp_err_t last_err = ESP_FAIL;
+    int64_t deadline_ms = (esp_timer_get_time() / 1000) + timeout_ms;
+
+    while ((esp_timer_get_time() / 1000) < deadline_ms)
+    {
+        last_err = step_fn();
+        if (last_err == ESP_OK)
+        {
+            return ESP_OK;
+        }
+
+        if ((!retry_if_no_data && last_err == ESP_ERR_NOT_FOUND) ||
+            last_err == ESP_ERR_INVALID_ARG)
+        {
+            return last_err;
+        }
+
+        ESP_LOGW(TAG, "%s failed: %s; retrying", step_name, esp_err_to_name(last_err));
+        vTaskDelay(pdMS_TO_TICKS(AGNSS_INIT_STEP_RETRY_DELAY_MS));
+    }
+
+    ESP_LOGW(TAG, "%s did not complete within %u ms (last err: %s)",
+             step_name,
+             (unsigned)timeout_ms,
+             esp_err_to_name(last_err));
+    return last_err;
+}
 
 void agnss_get_status(bool *time_injected, bool *position_injected)
 {
@@ -99,10 +212,19 @@ int agnss_build_pair_cmd(char *buf, size_t buf_len, const char *body)
 static esp_err_t pair_send_and_wait_ack(int cmd_id, const char *cmd_str,
                                         uint32_t timeout_ms)
 {
+    esp_err_t lock_err = agnss_pair_lock_take(pdMS_TO_TICKS(timeout_ms + 250));
+    if (lock_err != ESP_OK)
+    {
+        ESP_LOGW(TAG, "PAIR%d: failed to acquire AGNSS lock: %s",
+                 cmd_id, esp_err_to_name(lock_err));
+        return lock_err;
+    }
+
     esp_err_t err = gps_uart_write(cmd_str, strlen(cmd_str));
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "PAIR%d: uart_write failed", cmd_id);
+        agnss_pair_lock_give();
         return ESP_FAIL;
     }
 
@@ -134,17 +256,20 @@ static esp_err_t pair_send_and_wait_ack(int cmd_id, const char *cmd_str,
             if (result == 0)
             {
                 ESP_LOGI(TAG, "PAIR%d ACK OK", cmd_id);
+                agnss_pair_lock_give();
                 return ESP_OK;
             }
             else
             {
                 ESP_LOGW(TAG, "PAIR%d ACK error: %d", cmd_id, result);
+                agnss_pair_lock_give();
                 return ESP_FAIL;
             }
         }
     }
 
     ESP_LOGW(TAG, "PAIR%d ACK timeout", cmd_id);
+    agnss_pair_lock_give();
     return ESP_ERR_TIMEOUT;
 }
 
@@ -231,6 +356,12 @@ static esp_err_t inject_reference_position(void)
 
 static esp_err_t verify_easy_enabled(void)
 {
+    esp_err_t lock_err = agnss_pair_lock_take(pdMS_TO_TICKS(3250));
+    if (lock_err != ESP_OK)
+    {
+        return lock_err;
+    }
+
     /* $PAIR491 — query EASY status */
     char cmd[32];
     agnss_build_pair_cmd(cmd, sizeof(cmd), "PAIR491");
@@ -238,6 +369,7 @@ static esp_err_t verify_easy_enabled(void)
     esp_err_t err = gps_uart_write(cmd, strlen(cmd));
     if (err != ESP_OK)
     {
+        agnss_pair_lock_give();
         return err;
     }
 
@@ -271,13 +403,16 @@ static esp_err_t verify_easy_enabled(void)
                 ESP_LOGW(TAG, "EASY not enabled – enabling now");
                 char ecmd[32];
                 agnss_build_pair_cmd(ecmd, sizeof(ecmd), "PAIR490,1");
-                pair_send_and_wait_ack(490, ecmd, 2000);
+                agnss_pair_lock_give();
+                return pair_send_and_wait_ack(490, ecmd, 2000);
             }
+            agnss_pair_lock_give();
             return ESP_OK;
         }
     }
 
     ESP_LOGW(TAG, "EASY status query timed out");
+    agnss_pair_lock_give();
     return ESP_ERR_TIMEOUT;
 }
 
@@ -424,14 +559,23 @@ static void agnss_init_task(void *arg)
 {
     (void)arg;
 
-    /* LC76G needs ~3 s after power-on before it responds to PAIR commands */
-    vTaskDelay(pdMS_TO_TICKS(5000));
+    if (wait_for_gps_ready(AGNSS_GPS_READY_WAIT_MS) != ESP_OK)
+    {
+        vTaskDelete(NULL);
+        return;
+    }
 
     /* 1. Verify EASY is enabled on the LC76G */
-    verify_easy_enabled();
+    (void)retry_init_step("EASY status query",
+                          verify_easy_enabled,
+                          AGNSS_INIT_STEP_RETRY_MS,
+                          true);
 
     /* 2. Inject reference position from NVS (best-effort) */
-    if (inject_reference_position() == ESP_OK)
+    if (retry_init_step("Reference position injection",
+                        inject_reference_position,
+                        AGNSS_INIT_STEP_RETRY_MS,
+                        false) == ESP_OK)
     {
         s_position_injected = true;
     }
@@ -466,11 +610,27 @@ esp_err_t agnss_init(bool enabled)
     ESP_LOGI(TAG, "Initializing AGNSS assistance (deferred to background)...");
 
     /* Start background init task */
-    xTaskCreate(agnss_init_task, "agnss_init", 4096, NULL, 3, NULL);
+    if (!s_pair_lock)
+    {
+        s_pair_lock = xSemaphoreCreateMutex();
+        if (!s_pair_lock)
+        {
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
+    if (xTaskCreate(agnss_init_task, "agnss_init", 4096, NULL, 3, NULL) != pdPASS)
+    {
+        return ESP_ERR_NO_MEM;
+    }
 
     /* Start position caching task */
     s_cache_task_running = true;
-    xTaskCreate(cache_position_task, "agnss_cache", 4096, NULL, 2, NULL);
+    if (xTaskCreate(cache_position_task, "agnss_cache", 4096, NULL, 2, NULL) != pdPASS)
+    {
+        s_cache_task_running = false;
+        return ESP_ERR_NO_MEM;
+    }
 
     return ESP_OK;
 }
