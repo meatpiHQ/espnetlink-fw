@@ -1,5 +1,6 @@
 #include "private/usbnet_usb.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "esp_check.h"
@@ -35,6 +36,7 @@ static const char *TAG = "usb_dev_eth";
 
 #define USBD_MAX_POWER_MA 100
 
+#define USB_STRING_SERIAL_INDEX       0x03
 #define USB_STRING_RNDIS_INTF_INDEX   0x04
 #define USB_STRING_CONSOLE_INTF_INDEX 0x05
 
@@ -95,12 +97,18 @@ static const uint8_t s_device_quality_descriptor[] = {
     0x00,
 };
 
+#define USB_MAC_STRING_DESC_LEN   sizeof("001122334455")
+#define USB_RNDIS_STRING_DESC_LEN sizeof("RNDIS 001122334455")
+
+static char s_serial_string_descriptor[USB_MAC_STRING_DESC_LEN] = "000000000003";
+static char s_rndis_string_descriptor[USB_RNDIS_STRING_DESC_LEN] = "RNDIS";
+
 static const char *s_string_descriptors[] = {
     (const char[]){ 0x09, 0x04 },
     "ESPNetLink",
     "ESPNetLink RNDIS",
-    "000000000000",
-    "RNDIS",
+    s_serial_string_descriptor,
+    s_rndis_string_descriptor,
     "Console",
 };
 
@@ -136,6 +144,42 @@ static const char *string_descriptor_callback(uint8_t speed, uint8_t index)
     {
         return NULL;
     }
+
+    if ((index == USB_STRING_SERIAL_INDEX) || (index == USB_STRING_RNDIS_INTF_INDEX))
+    {
+        uint8_t mac[6] = { 0 };
+        esp_err_t err = esp_read_mac(mac, ESP_MAC_WIFI_STA);
+
+        if (err == ESP_OK)
+        {
+            (void)snprintf(s_serial_string_descriptor,
+                           sizeof(s_serial_string_descriptor),
+                           "%02X%02X%02X%02X%02X%02X",
+                           mac[0],
+                           mac[1],
+                           mac[2],
+                           mac[3],
+                           mac[4],
+                           mac[5]);
+
+            (void)snprintf(s_rndis_string_descriptor,
+                           sizeof(s_rndis_string_descriptor),
+                           "RNDIS %02X%02X%02X%02X%02X%02X",
+                           mac[0],
+                           mac[1],
+                           mac[2],
+                           mac[3],
+                           mac[4],
+                           mac[5]);
+        }
+        else
+        {
+            ESP_LOGW(TAG, "esp_read_mac failed for USB string (%d)", (int)err);
+            (void)snprintf(s_serial_string_descriptor, sizeof(s_serial_string_descriptor), "000000000003");
+            (void)snprintf(s_rndis_string_descriptor, sizeof(s_rndis_string_descriptor), "RNDIS");
+        }
+    }
+
     return s_string_descriptors[index];
 }
 
