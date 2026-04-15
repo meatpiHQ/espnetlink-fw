@@ -6,6 +6,7 @@
 #include <stdlib.h>
 
 #include "esp_log.h"
+#include "esp_netif.h"
 
 #include "lwip/tcpip.h"
 #if CONFIG_LWIP_IPV4_NAPT
@@ -59,6 +60,13 @@ static void usbnet_enable_sharing_in_tcpip(void *arg)
 
 esp_err_t usb_dev_ethernet_start(void)
 {
+    esp_err_t err = esp_netif_init();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE)
+    {
+        ESP_LOGE(TAG, "esp_netif_init failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
     usbnet_usb_start();
     return ESP_OK;
 }

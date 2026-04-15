@@ -11,6 +11,7 @@
 #include "esp_console.h"
 #include "esp_err.h"
 #include "esp_idf_version.h"
+#include "esp_log.h"
 #include "esp_vfs.h"
 
 #include "gps.h"
@@ -43,6 +44,8 @@
 
 #define USB_CLI_PROMPT "esp> "
 
+static const char *TAG = "usb_cli";
+
 static bool s_enabled = false;
 static TaskHandle_t s_task = NULL;
 static volatile bool s_dtr = false;
@@ -50,6 +53,8 @@ static volatile bool s_tx_busy = false;
 static volatile bool s_configured = false;
 static volatile bool s_gps_stream_mode = false;
 static volatile bool s_gps_stream_exit_requested = false;
+static volatile bool s_rx_rearm_pending = false;
+static volatile bool s_tx_retry_pending = false;
 
 static portMUX_TYPE s_line_mux = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_tx_mux = portMUX_INITIALIZER_UNLOCKED;
@@ -68,9 +73,15 @@ static TickType_t s_escape_last_tick = 0;
 #define USB_CLI_TX_BUF_SIZE 2048
 #endif
 
+#ifndef USB_CLI_TX_CHUNK_SIZE
+#define USB_CLI_TX_CHUNK_SIZE 64
+#endif
+
 static uint8_t s_tx_buf[USB_CLI_TX_BUF_SIZE];
 static size_t s_tx_head = 0;
 static size_t s_tx_tail = 0;
+static uint8_t s_tx_inflight_buf[USB_CLI_TX_CHUNK_SIZE];
+static size_t s_tx_inflight_len = 0;
 
 static struct usbd_interface s_intf0;
 static struct usbd_interface s_intf1;
@@ -78,6 +89,9 @@ static struct usbd_interface s_intf1;
 static bool s_esp_console_inited = false;
 static bool s_stdio_redirect_inited = false;
 static bool s_vfs_registered = false;
+
+static void usb_cli_kick_task(void);
+static void usb_cli_try_recover_io(void);
 
 static void usb_cli_console_init_esp_console_once(void)
 {
@@ -112,6 +126,10 @@ void usb_cli_console_set_gps_stream_mode(bool enabled)
     s_escape_len = 0;
     s_escape_last_tick = 0;
     s_gps_stream_exit_requested = false;
+
+    portENTER_CRITICAL(&s_line_mux);
+    s_line_len = 0;
+    portEXIT_CRITICAL(&s_line_mux);
 }
 
 static bool usb_cli_tx_ring_is_empty(void)
@@ -153,15 +171,34 @@ static size_t usb_cli_tx_ring_push_unsafe(const uint8_t *data, size_t len)
     return pushed;
 }
 
-static size_t usb_cli_tx_ring_pop_chunk_unsafe(uint8_t *out, size_t max_len)
+static size_t usb_cli_tx_ring_peek_chunk_unsafe(uint8_t *out, size_t max_len)
 {
     size_t n = 0;
-    while (n < max_len && !usb_cli_tx_ring_is_empty())
+
+    if (max_len == 0)
     {
-        out[n++] = s_tx_buf[s_tx_tail];
-        s_tx_tail = (s_tx_tail + 1) % USB_CLI_TX_BUF_SIZE;
+        return 0;
     }
+
+    size_t idx = s_tx_tail;
+    while (n < max_len && idx != s_tx_head)
+    {
+        out[n++] = s_tx_buf[idx];
+        idx = (idx + 1) % USB_CLI_TX_BUF_SIZE;
+    }
+
     return n;
+}
+
+static void usb_cli_tx_ring_drop_unsafe(size_t len)
+{
+    size_t remaining = len;
+
+    while (remaining > 0 && !usb_cli_tx_ring_is_empty())
+    {
+        s_tx_tail = (s_tx_tail + 1) % USB_CLI_TX_BUF_SIZE;
+        remaining--;
+    }
 }
 
 static void usb_cli_tx_kick_from_any_context(uint8_t busid)
@@ -176,15 +213,15 @@ static void usb_cli_tx_kick_from_any_context(uint8_t busid)
         return;
     }
 
-    uint8_t chunk[64];
     size_t chunk_len = 0;
 
     portENTER_CRITICAL(&s_tx_mux);
     if (!usb_cli_tx_ring_is_empty())
     {
-        chunk_len = usb_cli_tx_ring_pop_chunk_unsafe(chunk, sizeof(chunk));
+        chunk_len = usb_cli_tx_ring_peek_chunk_unsafe(s_tx_inflight_buf, sizeof(s_tx_inflight_buf));
         if (chunk_len > 0)
         {
+            s_tx_inflight_len = chunk_len;
             s_tx_busy = true;
         }
     }
@@ -192,7 +229,21 @@ static void usb_cli_tx_kick_from_any_context(uint8_t busid)
 
     if (chunk_len > 0)
     {
-        (void)usbd_ep_start_write(busid, USB_CLI_CONSOLE_IN_EP, chunk, (uint32_t)chunk_len);
+        int rc = usbd_ep_start_write(busid, USB_CLI_CONSOLE_IN_EP, s_tx_inflight_buf, (uint32_t)chunk_len);
+        if (rc < 0)
+        {
+            portENTER_CRITICAL(&s_tx_mux);
+            s_tx_busy = false;
+            s_tx_inflight_len = 0;
+            portEXIT_CRITICAL(&s_tx_mux);
+            s_tx_retry_pending = true;
+            ESP_LOGW(TAG, "IN start failed: %d", rc);
+            usb_cli_kick_task();
+        }
+        else
+        {
+            s_tx_retry_pending = false;
+        }
     }
 }
 
@@ -371,6 +422,8 @@ static void usb_cli_console_task(void *arg)
     {
         (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
+        usb_cli_try_recover_io();
+
         if (s_gps_stream_exit_requested)
         {
             s_gps_stream_exit_requested = false;
@@ -478,9 +531,37 @@ static void usb_cli_kick_task(void)
     xTaskNotifyGive(s_task);
 }
 
-static void usb_cli_arm_out_read(uint8_t busid)
+static bool usb_cli_arm_out_read(uint8_t busid)
 {
-    (void)usbd_ep_start_read(busid, USB_CLI_CONSOLE_OUT_EP, s_rx_ep_buf, sizeof(s_rx_ep_buf));
+    int rc = usbd_ep_start_read(busid, USB_CLI_CONSOLE_OUT_EP, s_rx_ep_buf, sizeof(s_rx_ep_buf));
+    if (rc < 0)
+    {
+        s_rx_rearm_pending = true;
+        ESP_LOGW(TAG, "OUT rearm failed: %d", rc);
+        return false;
+    }
+
+    s_rx_rearm_pending = false;
+    return true;
+}
+
+static void usb_cli_try_recover_io(void)
+{
+    if (!s_enabled || !s_configured)
+    {
+        return;
+    }
+
+    if (s_rx_rearm_pending)
+    {
+        (void)usb_cli_arm_out_read(s_busid);
+    }
+
+    if (s_tx_retry_pending && s_dtr)
+    {
+        s_tx_retry_pending = false;
+        usb_cli_tx_kick_from_any_context(s_busid);
+    }
 }
 
 static void usb_cli_on_rx_bytes(const uint8_t *data, size_t len)
@@ -612,7 +693,7 @@ static void usb_cli_bulk_out(uint8_t busid, uint8_t ep, uint32_t nbytes)
 
     if (!s_enabled)
     {
-        usb_cli_arm_out_read(busid);
+        (void)usb_cli_arm_out_read(busid);
         return;
     }
 
@@ -623,17 +704,24 @@ static void usb_cli_bulk_out(uint8_t busid, uint8_t ep, uint32_t nbytes)
 
     usb_cli_on_rx_bytes(s_rx_ep_buf, (size_t)nbytes);
 
-    usb_cli_arm_out_read(busid);
+    if (!usb_cli_arm_out_read(busid))
+    {
+        usb_cli_kick_task();
+    }
 }
 
 static void usb_cli_bulk_in(uint8_t busid, uint8_t ep, uint32_t nbytes)
 {
-    (void)busid;
-
     // Mark idle and send next queued chunk (if any).
     (void)ep;
     (void)nbytes;
+
+    portENTER_CRITICAL(&s_tx_mux);
+    usb_cli_tx_ring_drop_unsafe(s_tx_inflight_len);
+    s_tx_inflight_len = 0;
     s_tx_busy = false;
+    portEXIT_CRITICAL(&s_tx_mux);
+
     usb_cli_tx_kick_from_any_context(busid);
 }
 
@@ -688,13 +776,19 @@ void usb_cli_console_usb_on_configured(uint8_t busid)
     s_tx_busy = false;
     s_configured = true;
     s_line_len = 0;
+    s_tx_inflight_len = 0;
+    s_rx_rearm_pending = false;
+    s_tx_retry_pending = false;
 
     portENTER_CRITICAL(&s_tx_mux);
     s_tx_head = 0;
     s_tx_tail = 0;
     portEXIT_CRITICAL(&s_tx_mux);
 
-    usb_cli_arm_out_read(busid);
+    if (!usb_cli_arm_out_read(busid))
+    {
+        usb_cli_kick_task();
+    }
 }
 
 // Override weak hooks so we can gate output on DTR.
