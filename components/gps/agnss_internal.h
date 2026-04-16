@@ -43,6 +43,7 @@ int agnss_build_pair_cmd(char *buf, size_t buf_len, const char *body);
 /* ---- Injection status (implemented in agnss.c) ---- */
 
 void agnss_get_status(bool *time_injected, bool *position_injected);
+esp_err_t agnss_try_inject_now(bool *time_injected, bool *position_injected);
 
 /* ---- NVS position cache (implemented in agnss_nvs.c) ---- */
 

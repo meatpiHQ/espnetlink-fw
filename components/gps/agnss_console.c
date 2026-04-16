@@ -35,12 +35,13 @@ static int cmd_agnss(int argc, char **argv)
 {
     if (argc < 2)
     {
-        printf("Usage: agnss -s | -v | -e | -d | -i [sec]\n");
+        printf("Usage: agnss -s | -v | -e | -d | -i [sec] | -x\n");
         printf("  -s  status    Show AGNSS status\n");
         printf("  -v  save      Save EASY navigation data\n");
         printf("  -e  enable    Enable AGNSS (next boot)\n");
         printf("  -d  disable   Disable AGNSS (next boot)\n");
         printf("  -i  interval  Get/set cache interval in seconds\n");
+        printf("  -x  inject    Inject time and cached position now\n");
         return 1;
     }
 
@@ -123,8 +124,26 @@ static int cmd_agnss(int argc, char **argv)
         return 0;
     }
 
+    if (strcmp(sub, "-x") == 0 || strcmp(sub, "inject") == 0)
+    {
+        bool time_ok = false;
+        bool pos_ok = false;
+        esp_err_t err = agnss_try_inject_now(&time_ok, &pos_ok);
+
+        printf("Time injection:     %s\n", time_ok ? "ok" : "not applied");
+        printf("Position injection: %s\n", pos_ok ? "ok" : "not applied");
+
+        if (err == ESP_OK)
+        {
+            return 0;
+        }
+
+        printf("AGNSS inject failed: %s\n", esp_err_to_name(err));
+        return 1;
+    }
+
     printf("Unknown option: %s\n", sub);
-    printf("Usage: agnss -s | -v | -e | -d | -i [sec]\n");
+    printf("Usage: agnss -s | -v | -e | -d | -i [sec] | -x\n");
     return 1;
 }
 
@@ -137,7 +156,7 @@ void agnss_console_register(void)
 
     const esp_console_cmd_t cmd = {
         .command = "agnss",
-        .help = "AGNSS: -s status, -v save, -e enable, -d disable, -i [sec] cache interval",
+        .help = "AGNSS: -s status, -v save, -e enable, -d disable, -i [sec] cache interval, -x inject now",
         .hint = NULL,
         .func = &cmd_agnss,
     };

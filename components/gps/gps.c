@@ -73,6 +73,28 @@ static QueueHandle_t s_pair_queue;
 static EventGroupHandle_t s_gps_evt;
 static TaskHandle_t s_gps_parser_task;
 
+static esp_err_t gps_power_pin_set(bool enabled)
+{
+    esp_err_t err = gpio_reset_pin(GPS_PWR_EN_PIN);
+    if (err != ESP_OK)
+    {
+        return err;
+    }
+
+    err = gpio_set_direction(GPS_PWR_EN_PIN, GPIO_MODE_OUTPUT);
+    if (err != ESP_OK)
+    {
+        return err;
+    }
+
+    return gpio_set_level(GPS_PWR_EN_PIN, enabled ? 1 : 0);
+}
+
+static bool gps_power_pin_is_enabled(void)
+{
+    return gpio_get_level(GPS_PWR_EN_PIN) != 0;
+}
+
 static double gps_coord_to_decimal(int degrees, double minutes, char cardinal)
 {
     double v = (double)degrees + (minutes / 60.0);
@@ -576,6 +598,7 @@ static int cmd_gps(int argc, char **argv)
     bool opt_json = false;
     bool opt_passthru = false;
     bool opt_check = false;
+    bool opt_power = false;
 
     for (int i = 1; i < argc; i++)
     {
@@ -594,16 +617,79 @@ static int cmd_gps(int argc, char **argv)
         else if (strcmp(argv[i], "-t") == 0)
         {
             opt_passthru = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-')
+            {
+                i++;
+            }
         }
         else if (strcmp(argv[i], "-c") == 0)
         {
             opt_check = true;
         }
+        else if (strcmp(argv[i], "-P") == 0)
+        {
+            opt_power = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-')
+            {
+                i++;
+            }
+        }
         else
         {
-            printf("Usage: gps -p [-j] | gps -s | gps -t [0|1] | gps -c\n");
+            printf("Usage: gps -p [-j] | gps -s | gps -t [0|1] | gps -c | gps -P [0|1]\n");
             return 1;
         }
+    }
+
+    if (opt_power)
+    {
+        int idx = -1;
+        for (int i = 1; i < argc; i++)
+        {
+            if (strcmp(argv[i], "-P") == 0 && i + 1 < argc)
+            {
+                idx = i + 1;
+                break;
+            }
+        }
+
+        if (idx < 0)
+        {
+            printf("GPS power: %s\n", gps_power_pin_is_enabled() ? "on" : "off");
+            return 0;
+        }
+
+        int val = atoi(argv[idx]);
+        if (val != 0 && val != 1)
+        {
+            printf("Usage: gps -P [0|1]\n");
+            return 1;
+        }
+
+        if (val != 0)
+        {
+            esp_err_t err = gps_init(false);
+            if (err != ESP_OK)
+            {
+                printf("GPS power on failed: %s\n", esp_err_to_name(err));
+                return 1;
+            }
+        }
+        else
+        {
+            gps_set_streaming(false);
+            usb_cli_console_set_gps_stream_mode(false);
+        }
+
+        esp_err_t err = gps_power_pin_set(val != 0);
+        if (err != ESP_OK)
+        {
+            printf("GPS power change failed: %s\n", esp_err_to_name(err));
+            return 1;
+        }
+
+        printf("GPS power: %s\n", val != 0 ? "on" : "off");
+        return 0;
     }
 
     if (opt_check)
@@ -664,7 +750,7 @@ static int cmd_gps(int argc, char **argv)
 
     if (!opt_print)
     {
-        printf("Usage: gps -p [-j] | gps -s | gps -t [0|1] | gps -c\n");
+        printf("Usage: gps -p [-j] | gps -s | gps -t [0|1] | gps -c | gps -P [0|1]\n");
         return 1;
     }
 
@@ -682,7 +768,7 @@ void gps_console_register(void)
 
     const esp_console_cmd_t cmd = {
         .command = "gps",
-        .help = "GPS: -p [-j] print fix, -s stream NMEA, -t [0|1] passthrough, -c check UART",
+        .help = "GPS: -p [-j] print fix, -s stream NMEA, -t [0|1] passthrough, -c check UART, -P [0|1] power",
         .hint = NULL,
         .func = &cmd_gps,
     };

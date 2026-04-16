@@ -477,6 +477,49 @@ esp_err_t agnss_try_inject_time(void)
     return err;
 }
 
+esp_err_t agnss_try_inject_now(bool *time_injected, bool *position_injected)
+{
+    bool time_ok = false;
+    bool pos_ok = false;
+
+    esp_err_t time_err = inject_reference_time();
+    if (time_err == ESP_OK)
+    {
+        s_time_injected = true;
+        time_ok = true;
+        ESP_LOGI(TAG, "Reference time injected (manual trigger)");
+    }
+
+    esp_err_t pos_err = inject_reference_position();
+    if (pos_err == ESP_OK)
+    {
+        s_position_injected = true;
+        pos_ok = true;
+        ESP_LOGI(TAG, "Cached position injected (manual trigger)");
+    }
+
+    if (time_injected)
+    {
+        *time_injected = time_ok;
+    }
+    if (position_injected)
+    {
+        *position_injected = pos_ok;
+    }
+
+    if (time_ok || pos_ok)
+    {
+        return ESP_OK;
+    }
+
+    if (time_err != ESP_OK)
+    {
+        return time_err;
+    }
+
+    return pos_err;
+}
+
 /* -----------------------------------------------------------------------
  * Position cache task
  * ----------------------------------------------------------------------- */
