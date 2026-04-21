@@ -34,6 +34,7 @@ TEST_CASE("config_manager end-to-end sanity", "[config_manager]")
 
     char value_buf[96] = {0};
     bool bool_value = false;
+    bool gps_uart0_out = true;
 
     TEST_ASSERT_EQUAL(ESP_OK, config_get_str("APN", value_buf, sizeof(value_buf)));
     TEST_ASSERT_EQUAL_STRING("internet", value_buf);
@@ -41,8 +42,12 @@ TEST_CASE("config_manager end-to-end sanity", "[config_manager]")
     TEST_ASSERT_EQUAL(ESP_OK, config_get_bool("LTE_ENABLED", &bool_value));
     TEST_ASSERT_TRUE(bool_value);
 
+    TEST_ASSERT_EQUAL(ESP_OK, config_get_bool("GPS_UART0_OUT", &gps_uart0_out));
+    TEST_ASSERT_FALSE(gps_uart0_out);
+
     TEST_ASSERT_EQUAL(ESP_OK, config_set_str("APN", "my_apn"));
     TEST_ASSERT_EQUAL(ESP_OK, config_set_from_str("LTE_ENABLED", "false"));
+    TEST_ASSERT_EQUAL(ESP_OK, config_set_from_str("GPS_UART0_OUT", "true"));
     TEST_ASSERT_EQUAL(ESP_OK, config_save());
 
     memset(value_buf, 0, sizeof(value_buf));
@@ -51,6 +56,9 @@ TEST_CASE("config_manager end-to-end sanity", "[config_manager]")
 
     TEST_ASSERT_EQUAL(ESP_OK, config_get_bool("LTE_ENABLED", &bool_value));
     TEST_ASSERT_FALSE(bool_value);
+
+    TEST_ASSERT_EQUAL(ESP_OK, config_get_bool("GPS_UART0_OUT", &gps_uart0_out));
+    TEST_ASSERT_TRUE(gps_uart0_out);
 
     TEST_ASSERT_EQUAL(ESP_OK, config_set_str("APN", "my_apn"));
     TEST_ASSERT_EQUAL(ESP_OK, config_set_from_str("LTE_ENABLED", "false"));
@@ -67,6 +75,9 @@ TEST_CASE("config_manager end-to-end sanity", "[config_manager]")
 
     TEST_ASSERT_EQUAL(ESP_OK, config_get_bool("LTE_ENABLED", &bool_value));
     TEST_ASSERT_TRUE(bool_value);
+
+    TEST_ASSERT_EQUAL(ESP_OK, config_get_bool("GPS_UART0_OUT", &gps_uart0_out));
+    TEST_ASSERT_FALSE(gps_uart0_out);
 }
 
 TEST_CASE("config_manager persists wrapper fields", "[config_manager]")

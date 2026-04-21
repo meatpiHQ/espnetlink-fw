@@ -17,6 +17,8 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
+#include "soc/uart_channel.h"
+
 #include "config_manager.h"
 #include "hw_config.h"
 
@@ -53,11 +55,15 @@ typedef struct
 static bool s_inited = false;
 static bool s_cmd_registered = false;
 
-static volatile bool s_streaming = false;
+static volatile bool s_streaming_usb = false;
+static volatile bool s_streaming_uart0 = false;
+static bool s_uart0_ready = false;
 
 #define GPS_UART_RX_BUFFER_SIZE   16384
+#define GPS_UART0_RX_BUFFER_SIZE  256
 #define GPS_PARSER_TASK_STACK     4096
 #define GPS_PARSER_TASK_PRIO      8
+#define GPS_UART0_BAUD_RATE       115200
 
 static SemaphoreHandle_t s_fix_lock;
 static gps_fix_t s_fix;
@@ -72,6 +78,112 @@ static QueueHandle_t s_pair_queue;
 #define GPS_EVT_UART_RX  BIT0
 static EventGroupHandle_t s_gps_evt;
 static TaskHandle_t s_gps_parser_task;
+
+static void gps_print_usage(void)
+{
+    printf("Usage: gps -p [-j] | gps -s | gps -t [0|1] | gps -U [0|1] | gps -c | gps -P [0|1]\n");
+}
+
+static esp_err_t gps_uart0_prepare(void)
+{
+    uart_config_t cfg = {
+        .baud_rate = GPS_UART0_BAUD_RATE,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
+    };
+
+    if (!uart_is_driver_installed(UART_NUM_0))
+    {
+        esp_err_t err = uart_driver_install(UART_NUM_0,
+                                            GPS_UART0_RX_BUFFER_SIZE,
+                                            0,
+                                            0,
+                                            NULL,
+                                            0);
+        if (err != ESP_OK)
+        {
+            s_uart0_ready = false;
+            return err;
+        }
+    }
+
+    esp_err_t err = uart_param_config(UART_NUM_0, &cfg);
+    if (err != ESP_OK)
+    {
+        s_uart0_ready = false;
+        return err;
+    }
+
+    err = uart_set_pin(UART_NUM_0,
+                       UART_NUM_0_TXD_DIRECT_GPIO_NUM,
+                       UART_NUM_0_RXD_DIRECT_GPIO_NUM,
+                       UART_PIN_NO_CHANGE,
+                       UART_PIN_NO_CHANGE);
+    if (err != ESP_OK)
+    {
+        s_uart0_ready = false;
+        return err;
+    }
+
+    s_uart0_ready = true;
+    return ESP_OK;
+}
+
+static void gps_uart0_write_sentence(const char *data, size_t len)
+{
+    if (!data || len == 0)
+    {
+        return;
+    }
+
+    if (!s_uart0_ready && gps_uart0_prepare() != ESP_OK)
+    {
+        return;
+    }
+
+    int written = uart_write_bytes(UART_NUM_0, data, len);
+    if (written < 0)
+    {
+        s_uart0_ready = false;
+        return;
+    }
+
+    (void)uart_wait_tx_done(UART_NUM_0, pdMS_TO_TICKS(20));
+}
+
+static void gps_apply_persisted_uart0_output(void)
+{
+    bool enabled = false;
+    if (config_get_bool("GPS_UART0_OUT", &enabled) == ESP_OK)
+    {
+        if (enabled)
+        {
+            enabled = (gps_uart0_prepare() == ESP_OK);
+        }
+        s_streaming_uart0 = enabled;
+    }
+}
+
+static void gps_set_uart0_output(bool enabled)
+{
+    if (enabled)
+    {
+        if (gps_uart0_prepare() != ESP_OK)
+        {
+            s_streaming_uart0 = false;
+            return;
+        }
+    }
+    s_streaming_uart0 = enabled;
+}
+
+static bool gps_is_uart0_output_enabled(void)
+{
+    return s_streaming_uart0;
+}
 
 static esp_err_t gps_power_pin_set(bool enabled)
 {
@@ -280,11 +392,16 @@ static void gps_parser_task(void *arg)
             {
                 sentence[sidx] = '\0';
 
-                if (s_streaming)
+                if (s_streaming_usb)
                 {
                     // Stream raw NMEA to console output.
                     // (stdout is redirected by usb_cli_console VFS)
                     printf("%s", sentence);
+                }
+
+                if (s_streaming_uart0)
+                {
+                    gps_uart0_write_sentence(sentence, sidx);
                 }
 
                 /* Intercept $PAIR responses and route to the queue */
@@ -346,6 +463,7 @@ esp_err_t gps_init(bool enable_agnss)
 {
     if (s_inited)
     {
+        gps_apply_persisted_uart0_output();
         return ESP_OK;
     }
 
@@ -393,6 +511,8 @@ esp_err_t gps_init(bool enable_agnss)
 
     /* Start AGNSS assistance if requested */
     agnss_init(enable_agnss);
+
+    gps_apply_persisted_uart0_output();
 
     return ESP_OK;
 }
@@ -442,12 +562,12 @@ esp_err_t gps_uart_write(const void *data, size_t len)
 
 void gps_set_streaming(bool enabled)
 {
-    s_streaming = enabled;
+    s_streaming_usb = enabled;
 }
 
 bool gps_is_streaming(void)
 {
-    return s_streaming;
+    return s_streaming_usb || s_streaming_uart0;
 }
 
 static void gps_print_last_fix(bool json)
@@ -597,6 +717,7 @@ static int cmd_gps(int argc, char **argv)
     bool opt_print = false;
     bool opt_json = false;
     bool opt_passthru = false;
+    bool opt_uart0 = false;
     bool opt_check = false;
     bool opt_power = false;
 
@@ -622,6 +743,14 @@ static int cmd_gps(int argc, char **argv)
                 i++;
             }
         }
+        else if (strcmp(argv[i], "-U") == 0)
+        {
+            opt_uart0 = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-')
+            {
+                i++;
+            }
+        }
         else if (strcmp(argv[i], "-c") == 0)
         {
             opt_check = true;
@@ -636,7 +765,7 @@ static int cmd_gps(int argc, char **argv)
         }
         else
         {
-            printf("Usage: gps -p [-j] | gps -s | gps -t [0|1] | gps -c | gps -P [0|1]\n");
+            gps_print_usage();
             return 1;
         }
     }
@@ -689,6 +818,70 @@ static int cmd_gps(int argc, char **argv)
         }
 
         printf("GPS power: %s\n", val != 0 ? "on" : "off");
+        return 0;
+    }
+
+    if (opt_uart0)
+    {
+        int idx = -1;
+        for (int i = 1; i < argc; i++)
+        {
+            if (strcmp(argv[i], "-U") == 0 && i + 1 < argc)
+            {
+                idx = i + 1;
+                break;
+            }
+        }
+
+        if (idx < 0)
+        {
+            printf("GPS UART0 routing: %s\n",
+                   gps_is_uart0_output_enabled() ? "enabled" : "disabled");
+            return 0;
+        }
+
+        int val = atoi(argv[idx]);
+        if (val != 0 && val != 1)
+        {
+            printf("Usage: gps -U [0|1]\n");
+            return 1;
+        }
+
+        bool enable = (val != 0);
+        esp_err_t err = config_set_bool("GPS_UART0_OUT", enable);
+        if (err != ESP_OK)
+        {
+            printf("GPS UART0 routing update failed: %s\n", esp_err_to_name(err));
+            return 1;
+        }
+
+        err = config_save();
+        if (err != ESP_OK)
+        {
+            printf("GPS UART0 routing save failed: %s\n", esp_err_to_name(err));
+            return 1;
+        }
+
+        if (enable)
+        {
+            err = gps_init(false);
+            if (err != ESP_OK)
+            {
+                printf("GPS UART0 routing enable failed: %s\n", esp_err_to_name(err));
+                return 1;
+            }
+
+            err = gps_uart0_prepare();
+            if (err != ESP_OK)
+            {
+                printf("GPS UART0 prepare failed: %s\n", esp_err_to_name(err));
+                return 1;
+            }
+        }
+
+        gps_set_uart0_output(enable);
+        printf("GPS UART0 routing %s (persistent).\n",
+               enable ? "enabled" : "disabled");
         return 0;
     }
 
@@ -750,7 +943,7 @@ static int cmd_gps(int argc, char **argv)
 
     if (!opt_print)
     {
-        printf("Usage: gps -p [-j] | gps -s | gps -t [0|1] | gps -c | gps -P [0|1]\n");
+        gps_print_usage();
         return 1;
     }
 
@@ -768,7 +961,7 @@ void gps_console_register(void)
 
     const esp_console_cmd_t cmd = {
         .command = "gps",
-        .help = "GPS: -p [-j] print fix, -s stream NMEA, -t [0|1] passthrough, -c check UART, -P [0|1] power",
+        .help = "GPS: -p [-j] print fix, -s stream NMEA, -t [0|1] USB passthrough, -U [0|1] route NMEA to UART0, -c check UART, -P [0|1] power",
         .hint = NULL,
         .func = &cmd_gps,
     };
