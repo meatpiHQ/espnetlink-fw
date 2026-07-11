@@ -617,7 +617,9 @@ static void unregister_handlers(void)
 static void lte_monitor_task(void *arg)
 {
     (void)arg;
-    static const char *TAG_MON = "lte_monitor";
+    /* §10: one TAG per component; periodic poll results log at DEBUG (the
+     * 15 s status loop must not flood INFO — transitions log elsewhere). */
+    static const char *TAG_MON = "lte_upstream_pppos";
     char op_name[64] = {0};
     int op_act = 0;
     char net_type[32] = {0};  /* populated by QNWINFO or lte_act_to_str fallback */
@@ -644,11 +646,11 @@ static void lte_monitor_task(void *arg)
         if (esp_modem_get_signal_quality(s_dce, &rssi, &ber) == ESP_OK)
         {
             int rssi_dbm = (rssi < 99) ? (rssi * 2 - 113) : 0;
-            ESP_LOGI(TAG_MON, "Signal: RSSI=%d (%d dBm), BER=%d", rssi, rssi_dbm, ber);
+            ESP_LOGD(TAG_MON, "Signal: RSSI=%d (%d dBm), BER=%d", rssi, rssi_dbm, ber);
         }
         else
         {
-            ESP_LOGW(TAG_MON, "Signal quality query failed");
+            ESP_LOGD(TAG_MON, "Signal quality query failed");
         }
 
         /* Use AT+CEREG? for LTE/EPS registration (states 1=home, 5=roaming).
@@ -660,7 +662,7 @@ static void lte_monitor_task(void *arg)
         if (esp_modem_get_network_registration_state(s_dce, &reg_state) == ESP_OK)
         {
             net_registered = (reg_state == 1 || reg_state == 5);
-            ESP_LOGI(TAG_MON, "Network: %s (CEREG state=%d)",
+            ESP_LOGD(TAG_MON, "Network: %s (CEREG state=%d)",
                      net_registered ? "registered" : "not registered", reg_state);
         }
         else
@@ -670,7 +672,7 @@ static void lte_monitor_task(void *arg)
             if (esp_modem_get_network_attachment_state(s_dce, &attached) == ESP_OK)
             {
                 net_registered = (attached == 1);
-                ESP_LOGI(TAG_MON, "Network: %s (CGATT)", net_registered ? "attached" : "detached");
+                ESP_LOGD(TAG_MON, "Network: %s (CGATT)", net_registered ? "attached" : "detached");
             }
         }
         if (s_evt)
@@ -686,7 +688,7 @@ static void lte_monitor_task(void *arg)
         {
             EventBits_t bits = xEventGroupGetBits(s_evt);
             ppp_up = (bits & BIT_CONNECTED) && !(bits & BIT_DISCONNECTED);
-            ESP_LOGI(TAG_MON, "PPP: %s", ppp_up ? "connected" : "disconnected");
+            ESP_LOGD(TAG_MON, "PPP: %s", ppp_up ? "connected" : "disconnected");
         }
 
         /* Re-sync system time every ~60 s (alongside operator query) or

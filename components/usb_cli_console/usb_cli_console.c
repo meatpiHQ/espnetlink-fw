@@ -542,7 +542,14 @@ static void usb_cli_kick_task(void)
 
 static bool usb_cli_arm_out_read(uint8_t busid)
 {
-    int rc = usbd_ep_start_read(busid, USB_CLI_CONSOLE_OUT_EP, s_rx_ep_buf, sizeof(s_rx_ep_buf));
+    /* Raw mode reads ONE max-packet per URB: a bulk OUT read only completes
+     * on a short packet or a filled buffer, so a stream tail that is a
+     * multiple of 64 but smaller than this 256-byte buffer would never
+     * complete (bench-hit 2026-07-11: OTA stalled exactly 192 bytes short,
+     * twice). 64-byte reads complete on every packet; line mode keeps the
+     * full buffer (typed input always ends in a short packet). */
+    uint32_t len = (s_raw_rx_fn != NULL) ? 64 : sizeof(s_rx_ep_buf);
+    int rc = usbd_ep_start_read(busid, USB_CLI_CONSOLE_OUT_EP, s_rx_ep_buf, len);
     if (rc < 0)
     {
         s_rx_rearm_pending = true;

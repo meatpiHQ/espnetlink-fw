@@ -80,3 +80,23 @@ Tracked against `MEATPI_COMPONENT_STANDARD.md` rev 1.0. Updated 2026-07-11
 - Boot log default changed from silent (`esp_log_level_set("*", NONE)`) to
   INFO via log_manager settings — `debug 0/1` CLI still toggles globally, and
   `PUT /api/settings/log_manager {"level":"none"}` restores silence persistently.
+- **Open parity issue:** stdout is globally redirected to the CDC console, so
+  INFO logs emitted while a command runs interleave into CLI responses.
+  lte_upstream_pppos's 15 s monitor loop was demoted to DEBUG (§10), which
+  removes the common case; the systemic fix (log_manager console sink writes
+  the UART directly, not stdout) belongs to the CLI-migration phase.
+
+## Verified on hardware (2026-07-11 bench session)
+
+- Build/flash loop: CLI build + CDC OTA (`tools/cdc_ota.py`, ~10 s for 1.5 MB)
+  + UART chunk-flash recovery.
+- PSRAM 8 MB octal up; settings partition formatted + defaults persisted.
+- WiFi AP `ESPNetLink_894A5D` @192.168.80.1; `/api/wifi/status` + full
+  `/api/settings` cycle (PUT dedup, no-op submit, reboot-to-apply,
+  pending_reboot) over RNDIS.
+- RNDIS DHCP (per-netif dhcps) leases to Windows alongside the AP's server.
+- LTE end-to-end with SIM: BG95 registered (eMTC, ALDI Mobile), PPP up in
+  ~2 s warm, `ping 8.8.8.8` 4/4 at 56–97 ms — with `NCM_SHARE=false`
+  (bench policy: sharing stays off unless explicitly under test).
+- Regression fixed en route: esp_modem DTE "UART driver malloc error" — the
+  32K/16K INTERNAL UART rings no longer fit beside esp_wifi; now 16K/8K.
