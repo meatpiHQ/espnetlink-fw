@@ -38,7 +38,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-static const char *TAG = "agnss";
+static const char *TAG = "gps";
 
 static volatile bool s_time_injected = false;
 static volatile bool s_position_injected = false;

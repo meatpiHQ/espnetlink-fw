@@ -10,7 +10,7 @@
 
 #include "esp_log.h"
 
-static const char *TAG = "usb_dev_eth";
+static const char *TAG = "usb_dev_ethernet";
 
 #define USBNET_ETH_HDR_LEN 14
 

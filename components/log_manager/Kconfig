@@ -1,0 +1,24 @@
+menu "WiCAN log_manager"
+
+    config LOG_MANAGER_LINE_MAX
+        int "Maximum log line length (bytes)"
+        default 256
+        range 128 1024
+
+    config LOG_MANAGER_QUEUE_DEPTH
+        int "Message queue depth (lines)"
+        default 64
+        range 8 512
+        help
+            Producer-side buffer between ESP_LOGx callers and the log task.
+            Full queue drops the OLDEST line (never blocks a producer).
+
+    config LOG_MANAGER_RING_SIZE
+        int "PSRAM crash ring size (bytes)"
+        default 16384
+        range 1024 262144
+        help
+            PSRAM .noinit ring holding the most recent log output across
+            warm resets (readable after a crash, zero flash wear).
+
+endmenu

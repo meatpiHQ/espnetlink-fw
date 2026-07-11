@@ -337,9 +337,19 @@ static void usb_console_task(void *arg)
 #endif
     };
 
-    ESP_ERROR_CHECK(esp_console_init(&console_cfg));
-    esp_console_register_help_command();
-    register_console_commands();
+    /* No panic paths in components (standard §3): a console init failure
+     * costs the bridge CLI, never the device. */
+    esp_err_t console_err = esp_console_init(&console_cfg);
+    if (console_err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "esp_console_init failed: %s (bridge console disabled)",
+                 esp_err_to_name(console_err));
+    }
+    else
+    {
+        esp_console_register_help_command();
+        register_console_commands();
+    }
 
     ESP_LOGI(TAG, "CDC1: GPS passthrough by default; send +++++++ (or =======) + Enter to enter console");
 

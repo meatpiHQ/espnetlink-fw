@@ -12,7 +12,7 @@
 #include "esp_check.h"
 #include "esp_heap_caps.h"
 
-static const char *TAG_BR = "usb_bridge";
+static const char *TAG_BR = "usb_cdc_host_manager";
 
 // Context for a single UART<->USB bridge
 typedef struct

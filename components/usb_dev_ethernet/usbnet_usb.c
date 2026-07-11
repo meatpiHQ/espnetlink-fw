@@ -24,7 +24,7 @@
 #include "private/usbnet_lwip.h"
 #include "private/usbnet_state.h"
 
-static const char *TAG = "usb_dev_eth";
+static const char *TAG = "usb_dev_ethernet";
 
 // RNDIS endpoints
 #define CDC_IN_EP  0x81

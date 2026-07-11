@@ -58,6 +58,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 
+#include "esp_check.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -68,7 +69,7 @@
 
 #include "modem_manager.h"
 
-static const char *TAG = "modem_mgr";
+static const char *TAG = "modem_manager"; /* §10: TAG == component dir */
 
 // Active configuration is copied from user-provided cfg in modem_mgr_init
 static modem_mgr_config_t s_cfg;
@@ -318,17 +319,27 @@ static esp_err_t modem_uart_setup(int baud, bool hwfc_on)
     int rts = (s_cfg.rts_pin == GPIO_NUM_NC) ? UART_PIN_NO_CHANGE : (int)s_cfg.rts_pin;
     int cts = (s_cfg.cts_pin == GPIO_NUM_NC) ? UART_PIN_NO_CHANGE : (int)s_cfg.cts_pin;
 
-    ESP_ERROR_CHECK(uart_driver_install(s_cfg.uart_port, UART_RX_BUF_SIZE, UART_TX_BUF_SIZE, 0, NULL, 0));
-    ESP_ERROR_CHECK(uart_param_config(s_cfg.uart_port, &cfg));
-    ESP_ERROR_CHECK(uart_set_pin(s_cfg.uart_port, tx, rx, rts, cts));
+    /* No panic paths in components (standard §3): a UART setup failure
+     * degrades the modem, never boot-loops the device. */
+    ESP_RETURN_ON_ERROR(uart_driver_install(s_cfg.uart_port, UART_RX_BUF_SIZE,
+                                            UART_TX_BUF_SIZE, 0, NULL, 0),
+                        TAG, "uart_driver_install");
+    ESP_RETURN_ON_ERROR(uart_param_config(s_cfg.uart_port, &cfg), TAG,
+                        "uart_param_config");
+    ESP_RETURN_ON_ERROR(uart_set_pin(s_cfg.uart_port, tx, rx, rts, cts), TAG,
+                        "uart_set_pin");
 
     if (hwfc_on)
     {
-        ESP_ERROR_CHECK(uart_set_hw_flow_ctrl(s_cfg.uart_port, UART_HW_FLOWCTRL_CTS_RTS, 64));
+        ESP_RETURN_ON_ERROR(uart_set_hw_flow_ctrl(s_cfg.uart_port,
+                                                  UART_HW_FLOWCTRL_CTS_RTS, 64),
+                            TAG, "uart_set_hw_flow_ctrl");
     }
     else
     {
-        ESP_ERROR_CHECK(uart_set_hw_flow_ctrl(s_cfg.uart_port, UART_HW_FLOWCTRL_DISABLE, 0));
+        ESP_RETURN_ON_ERROR(uart_set_hw_flow_ctrl(s_cfg.uart_port,
+                                                  UART_HW_FLOWCTRL_DISABLE, 0),
+                            TAG, "uart_set_hw_flow_ctrl");
     }
 
     return ESP_OK;
@@ -875,14 +886,18 @@ static esp_err_t configure_flow_and_baud(void)
         // Important: Many modems apply IFC immediately, and if the host UART isn't
         // already configured for RTS/CTS, the modem may stop transmitting (including the OK).
         // So enable UART HW flow control BEFORE sending AT+IFC.
-        ESP_ERROR_CHECK(uart_set_hw_flow_ctrl(s_cfg.uart_port, UART_HW_FLOWCTRL_CTS_RTS, 64));
+        ESP_RETURN_ON_ERROR(uart_set_hw_flow_ctrl(s_cfg.uart_port,
+                                                  UART_HW_FLOWCTRL_CTS_RTS, 64),
+                            TAG, "uart_set_hw_flow_ctrl");
         sleep_ms(20);
 
         if (at_write("AT+IFC=2,2\r") != ESP_OK || !at_expect_ok(1000))
         {
             ESP_LOGE(TAG, "Failed to set IFC");
             // Revert UART flow control so caller can still communicate
-            ESP_ERROR_CHECK(uart_set_hw_flow_ctrl(s_cfg.uart_port, UART_HW_FLOWCTRL_DISABLE, 0));
+            ESP_ERROR_CHECK_WITHOUT_ABORT(
+                uart_set_hw_flow_ctrl(s_cfg.uart_port,
+                                      UART_HW_FLOWCTRL_DISABLE, 0));
             return ESP_FAIL;
         }
         changed = true;

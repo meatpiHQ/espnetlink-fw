@@ -26,3 +26,12 @@ esp_err_t filesystem_init(void)
 
     return ESP_OK;
 }
+
+FILE *filesystem_open(const char *path, const char *mode)
+{
+    if (path == NULL || mode == NULL) {
+        return NULL;
+    }
+
+    return fopen(path, mode);
+}

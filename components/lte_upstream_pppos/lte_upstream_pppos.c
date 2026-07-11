@@ -26,7 +26,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-static const char *TAG = "lte_pppos";
+static const char *TAG = "lte_upstream_pppos";
 
 static EventGroupHandle_t s_evt;
 static const EventBits_t BIT_CONNECTED        = BIT0;
@@ -1098,8 +1098,13 @@ static esp_err_t lte_inner_start(const lte_upstream_pppos_config_t *cfg)
      * task_priority default is 5 — raise to 10 to reduce scheduling latency
      * vs other tasks (tcpip task runs at 18; keep below that). */
     dte_config.dte_buffer_size                    = 32768;
-    dte_config.uart_config.rx_buffer_size         = 32768;
-    dte_config.uart_config.tx_buffer_size         = 16384;
+    /* UART rings live in INTERNAL RAM (CONFIG_UART_ISR_IN_IRAM forces the
+     * driver to allocate internal). 32K/16K stopped fitting once esp_wifi
+     * joined the build (bench-hit 2026-07-11: "UART driver malloc error" ->
+     * esp_modem_new NULL). 16K/8K is ample: the BG95 peaks well under
+     * 400 kbps and CTS/RTS flow control holds it off while the ring drains. */
+    dte_config.uart_config.rx_buffer_size         = 16384;
+    dte_config.uart_config.tx_buffer_size         = 8192;
     dte_config.task_stack_size                    = 8192;
     dte_config.task_priority                      = 10;
 

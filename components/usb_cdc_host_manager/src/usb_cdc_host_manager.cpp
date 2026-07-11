@@ -49,7 +49,7 @@ using namespace esp_usb;
 
 namespace {
 
-static const char* TAG = "usb_cdc_mgr";
+static const char* TAG = "usb_cdc_host_manager";
 
 // USB host stack configuration
 constexpr uint32_t USB_LIB_TASK_STACK_SIZE = 4096;

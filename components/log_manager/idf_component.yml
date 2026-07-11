@@ -1,0 +1,3 @@
+## log_manager has no managed dependencies of its own (cJSON arrives
+## transitively through settings_manager's public interface).
+dependencies: {}

@@ -13,12 +13,10 @@
 #include "lwip/lwip_napt.h"
 #endif
 
-#include "dhserver.h"
-
 #include "private/usbnet_state.h"
 #include "private/usbnet_usb.h"
 
-static const char *TAG = "usb_dev_eth";
+static const char *TAG = "usb_dev_ethernet";
 
 void usb_dev_ethernet_set_console_enabled(bool enabled)
 {
@@ -37,16 +35,9 @@ static void usbnet_enable_sharing_in_tcpip(void *arg)
 
     if (cfg && cfg->dns_ipv4_addr != 0)
     {
+        // DHCP option 6 stays 192.168.7.1 (the dhcps DNS offer); the local
+        // DNS proxy forwards to this upstream server.
         st->upstream_dns.addr = cfg->dns_ipv4_addr;
-        // Keep DHCP option 6 as 192.168.7.1; DNS proxy forwards upstream.
-        st->dhcp_cfg.dns = st->ipaddr;
-    }
-
-    dhserv_free();
-    err_t dh_err = dhserv_init(&st->dhcp_cfg);
-    if (dh_err != ERR_OK)
-    {
-        ESP_LOGE(TAG, "DHCP server restart failed: dhserv_init err=%d", (int)dh_err);
     }
 
 #if CONFIG_LWIP_IPV4_NAPT

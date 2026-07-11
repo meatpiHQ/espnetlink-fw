@@ -17,7 +17,7 @@
 #include <limits.h>
 #include <unistd.h>
 
-#define TAG            "config_mgr"
+#define TAG            "config_manager"
 #define CONFIG_FILE    FS_BASE_PATH "/config.json"
 #define CONFIG_FILE_TMP FS_BASE_PATH "/config.json.tmp"
 #define CONFIG_VERSION 1

@@ -24,7 +24,7 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 
-static const char *TAG = "agnss_nvs";
+static const char *TAG = "gps";
 
 #define NVS_NAMESPACE "gnss"
 #define NVS_KEY_LAT   "lat"

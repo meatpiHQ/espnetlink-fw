@@ -1,4 +1,5 @@
 #include "usb_cli_console.h"
+#include "usb_cli_console_internal.h"
 
 #include <string.h>
 
@@ -44,7 +45,7 @@
 
 #define USB_CLI_PROMPT "esp> "
 
-static const char *TAG = "usb_cli";
+static const char *TAG = "usb_cli_console";
 
 static bool s_enabled = false;
 static TaskHandle_t s_task = NULL;
@@ -55,6 +56,12 @@ static volatile bool s_gps_stream_mode = false;
 static volatile bool s_gps_stream_exit_requested = false;
 static volatile bool s_rx_rearm_pending = false;
 static volatile bool s_tx_retry_pending = false;
+
+// Raw RX diversion (OTA and similar bulk receivers). When set, incoming
+// bytes skip the line editor; when the sink reports "full" we deliberately
+// leave the OUT endpoint un-armed so the host throttles (CDC flow control).
+static volatile usb_cli_raw_rx_fn_t s_raw_rx_fn = NULL;
+static volatile bool s_raw_rx_paused = false;
 
 static portMUX_TYPE s_line_mux = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_tx_mux = portMUX_INITIALIZER_UNLOCKED;
@@ -111,6 +118,7 @@ static void usb_cli_console_init_esp_console_once(void)
     (void)esp_console_init(&console_cfg);
     esp_console_register_help_command();
     usb_cli_register_console_commands();
+    usb_cli_ota_register();
     gps_console_register();
     imu_console_register();
     lte_upstream_pppos_console_register();
@@ -518,7 +526,8 @@ static void usb_cli_start_task_if_needed(void)
         return;
     }
 
-    xTaskCreatePinnedToCore(usb_cli_console_task, "usb_cli", 4096, NULL, 8, &s_task, 0);
+    // 6144: the `ota` handler runs esp_ota_write + SHA-256 on this stack.
+    xTaskCreatePinnedToCore(usb_cli_console_task, "usb_cli", 6144, NULL, 8, &s_task, 0);
 }
 
 static void usb_cli_kick_task(void)
@@ -552,7 +561,7 @@ static void usb_cli_try_recover_io(void)
         return;
     }
 
-    if (s_rx_rearm_pending)
+    if (s_rx_rearm_pending && !s_raw_rx_paused)
     {
         (void)usb_cli_arm_out_read(s_busid);
     }
@@ -686,6 +695,37 @@ bool usb_cli_console_is_enabled(void)
     return s_enabled;
 }
 
+void usb_cli_console_set_raw_rx(usb_cli_raw_rx_fn_t fn)
+{
+    s_raw_rx_fn = fn;
+
+    if (fn == NULL && s_raw_rx_paused)
+    {
+        s_raw_rx_paused = false;
+        (void)usb_cli_arm_out_read(s_busid);
+    }
+}
+
+void usb_cli_console_raw_rx_resume(void)
+{
+    if (s_raw_rx_fn == NULL)
+    {
+        return;
+    }
+
+    if (s_raw_rx_paused)
+    {
+        s_raw_rx_paused = false;
+        (void)usb_cli_arm_out_read(s_busid);
+        return;
+    }
+
+    if (s_rx_rearm_pending)
+    {
+        (void)usb_cli_arm_out_read(s_busid);
+    }
+}
+
 // Endpoint callbacks (run in USB context; keep them minimal)
 static void usb_cli_bulk_out(uint8_t busid, uint8_t ep, uint32_t nbytes)
 {
@@ -700,6 +740,24 @@ static void usb_cli_bulk_out(uint8_t busid, uint8_t ep, uint32_t nbytes)
     if (nbytes > sizeof(s_rx_ep_buf))
     {
         nbytes = sizeof(s_rx_ep_buf);
+    }
+
+    usb_cli_raw_rx_fn_t raw_fn = s_raw_rx_fn;
+    if (raw_fn != NULL)
+    {
+        if (!raw_fn(s_rx_ep_buf, (size_t)nbytes))
+        {
+            // Consumer full: leave the endpoint un-armed so the host
+            // throttles; usb_cli_console_raw_rx_resume() re-arms it.
+            s_raw_rx_paused = true;
+            return;
+        }
+
+        if (!usb_cli_arm_out_read(busid))
+        {
+            usb_cli_kick_task();
+        }
+        return;
     }
 
     usb_cli_on_rx_bytes(s_rx_ep_buf, (size_t)nbytes);

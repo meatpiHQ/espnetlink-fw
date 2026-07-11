@@ -1,0 +1,12 @@
+# Coding Standard rev 2.1 (§7): on-device test apps build against the MAIN
+# firmware's partition table — no private fork. The `settings` littlefs
+# partition this component owns comes from there.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../../../wican_pro_partitions_table.csv"
+# Flash size matches the main firmware / WiCAN Pro hardware (16 MB).
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+# PSRAM config matches the main firmware sdkconfig (WiCAN Pro S3: octal, 80 MHz).
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y

@@ -21,6 +21,17 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 
+#include "esp_event.h"
+#include "esp_netif.h"
+
+#include "api_http.h"
+#include "cmdline_manager.h"
+#include "dev_status_manager.h"
+#include "http_server_manager.h"
+#include "log_manager.h"
+#include "settings_manager.h"
+#include "wifi_manager.h"
+
 // Select exactly one mode (set one to 1, the other to 0)
 #define USB_HOST_MODE        0
 #define USB_DEV_MODE         0
@@ -49,7 +60,7 @@
 #define EXAMPLE_PARITY       (0)      // 0: None, 1: Odd, 2: Even, 3: Mark, 4: Space
 #define EXAMPLE_DATA_BITS    (8)
 
-static const char *TAG = "VCP manager example";
+static const char *TAG = "main";
 
 #if USB_DEV_ETHERNET_MODE
 // Optional: bring up BG95 PPPoS upstream and share it over USB-NCM.
@@ -199,6 +210,37 @@ static void iface_tx_task(void *arg)
 }
 #endif // USB_HOST_MODE
 
+/** Init/register one step. NEVER panics: a deterministic init failure under
+ *  ESP_ERROR_CHECK would be a permanent boot loop — the one thing a field
+ *  device must never do (standard §3). A failed init leaves that component
+ *  unconfigured and the rest of the device keeps booting. */
+static bool init_step(const char *name, esp_err_t (*fn)(void))
+{
+    esp_err_t err = fn();
+
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "%s failed: %s (continuing degraded)", name,
+                 esp_err_to_name(err));
+    }
+
+    return err == ESP_OK;
+}
+
+/** Start one component; a failure degrades, never halts boot (§4.3). */
+static bool start_component(const char *name, esp_err_t (*start_fn)(void))
+{
+    esp_err_t err = start_fn();
+
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "%s_start failed: %s (continuing degraded)", name,
+                 esp_err_to_name(err));
+    }
+
+    return err == ESP_OK;
+}
+
 void app_main(void)
 {
 
@@ -223,12 +265,27 @@ void app_main(void)
     }
 
 
+    /* Log pipeline first (§9.6): everything below needs somewhere to log.
+     * dev_status early: the device id feeds the AP SSID suffix. */
+    init_step("log_manager_init", log_manager_init);
+    init_step("dev_status_manager_init", dev_status_manager_init);
+
     esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
+    {
+        ret = nvs_flash_erase();
+        if (ret == ESP_OK)
+        {
+            ret = nvs_flash_init();
+        }
     }
-    esp_log_level_set("*", ESP_LOG_NONE);
+    if (ret != ESP_OK)
+    {
+        /* Settings live on their own LittleFS partition, not NVS — a dead
+         * NVS mainly costs WiFi PHY cal + the AGNSS cache. Degrade. */
+        ESP_LOGE(TAG, "nvs_flash_init failed: %s (continuing degraded)",
+                 esp_err_to_name(ret));
+    }
 	gpio_reset_pin(USB_SEL_1);
 	gpio_set_direction(USB_SEL_1, GPIO_MODE_INPUT);
 	gpio_set_pull_mode(USB_SEL_1, GPIO_FLOATING);
@@ -293,6 +350,29 @@ void app_main(void)
         }
         
     }
+
+    /* ---- MeatPi core platform (standard §3/§4/§9) ------------------------- */
+    init_step("settings_manager_init", settings_manager_init);
+    init_step("log_manager_register_settings", log_manager_register_settings);
+    init_step("dev_status_manager_register_settings",
+              dev_status_manager_register_settings);
+
+    /* §9.2 exception: settings_manager can't register with log_manager
+     * (cycle) — the composition root does it. */
+    static const log_descriptor_t SETTINGS_LOG =
+        { "settings_manager", ESP_LOG_INFO };
+
+    log_manager_register(&SETTINGS_LOG);
+
+    init_step("esp_netif_init", esp_netif_init);
+    init_step("esp_event_loop_create_default", esp_event_loop_create_default);
+    init_step("http_server_manager_init", http_server_manager_init);
+    init_step("wifi_manager_init", wifi_manager_init);
+    init_step("cmdline_manager_init", cmdline_manager_init);
+    init_step("api_http_init", api_http_init);
+    init_step("wifi_manager_register_http", wifi_manager_register_http);
+    (void)http_server_manager_set_request_gate(
+        wifi_manager_http_request_allowed);
 
     filesystem_init();
 
@@ -403,11 +483,23 @@ void app_main(void)
     #elif USB_DEV_MODE
     ESP_ERROR_CHECK(usb_dev_bridge_start());
     #elif USB_DEV_ETHERNET_MODE
+    /* ---- the ONE settings apply pass (§4.3), then start the core --------- */
+    init_step("settings_manager_start", settings_manager_start);
+    init_step("log_manager_start", log_manager_start);
+    start_component("wifi_manager", wifi_manager_start);
+    start_component("http_server_manager", http_server_manager_start);
+    start_component("cmdline_manager", cmdline_manager_start);
+
     usb_dev_ethernet_set_console_enabled(true);
-    ESP_ERROR_CHECK(usb_dev_ethernet_start());
-    
+    start_component("usb_dev_ethernet", usb_dev_ethernet_start);
+
 #if USB_DEV_ETHERNET_MODE && ENABLE_LTE_UPSTREAM_PPPOS
-    (void)xTaskCreate(lte_upstream_task, "lte_pppos", 6144, NULL, 5, NULL);
+    /* Pinned to core 1: uart_driver_install allocates its interrupt on the
+     * calling core, and core 0's interrupt slots are exhausted now that
+     * esp_wifi is composed (bench-hit 2026-07-11: esp_modem UART DTE
+     * install failed with ESP_FAIL right after the wifi stack came up). */
+    (void)xTaskCreatePinnedToCore(lte_upstream_task, "lte_pppos", 6144, NULL,
+                                  5, NULL, 1);
 #endif
     #endif
     // Optionally, you can still use interface 0 independently as before

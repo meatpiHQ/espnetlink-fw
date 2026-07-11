@@ -13,7 +13,8 @@
 #include "lwip/pbuf.h"
 #include "lwip/tcpip.h"
 
-#include "dhserver.h"
+#include "dhcpserver/dhcpserver.h"
+#include "dhcpserver/dhcpserver_options.h"
 
 #include "usbd_core.h"
 #include "usbd_rndis.h"
@@ -23,7 +24,7 @@
 #include "private/usbnet_state.h"
 #include "private/usbnet_usb.h"
 
-static const char *TAG = "usb_dev_eth";
+static const char *TAG = "usb_dev_ethernet";
 
 static err_t usbnet_linkoutput(struct netif *netif, struct pbuf *p)
 {
@@ -51,6 +52,20 @@ static err_t usbnet_linkoutput(struct netif *netif, struct pbuf *p)
     }
 
     return ERR_BUF;
+}
+
+/* dhcpserver.c calls this UNCONDITIONALLY on every lease grant (esp_netif
+ * always installs one; the raw API crashes on NULL — bench-hit 2026-07-11:
+ * InstrFetchProhibited on the first DHCP REQUEST). */
+static void usbnet_dhcps_lease_cb(void *cb_arg, u8_t client_ip[4],
+                                  u8_t client_mac[6])
+{
+    (void)cb_arg;
+
+    ESP_LOGI(TAG, "DHCP lease %u.%u.%u.%u -> %02X:%02X:%02X:%02X:%02X:%02X",
+             client_ip[0], client_ip[1], client_ip[2], client_ip[3],
+             client_mac[0], client_mac[1], client_mac[2], client_mac[3],
+             client_mac[4], client_mac[5]);
 }
 
 static err_t usbnet_netif_init(struct netif *netif)
@@ -130,32 +145,40 @@ void usbnet_lwip_start_in_tcpip(void *arg)
     netif_set_up(&st->usbnetif);
     netif_set_link_up(&st->usbnetif);
 
-    memset(st->dhcp_entries, 0, sizeof(st->dhcp_entries));
-    for (int i = 0; i < (int)(sizeof(st->dhcp_entries) / sizeof(st->dhcp_entries[0])); i++)
+    // IDF's per-netif DHCP server (udp_bind_netif) — coexists with the WiFi
+    // AP's server on UDP/67. Advertise the device IP as DNS server; the small
+    // DNS proxy on 192.168.7.1 forwards upstream.
+    if (st->dhcps == NULL)
     {
-        IP4_ADDR(&st->dhcp_entries[i].addr, 192, 168, 7, 2 + i);
-        st->dhcp_entries[i].lease = 24 * 60 * 60;
+        st->dhcps = dhcps_new();
     }
 
-    memset(&st->dhcp_cfg, 0, sizeof(st->dhcp_cfg));
-    st->dhcp_cfg.router = st->ipaddr;
-    st->dhcp_cfg.port = 67;
-
-    // Advertise the device IP as DNS server and run a small DNS proxy on 192.168.7.1.
-    st->dhcp_cfg.dns = st->ipaddr;
-
-    st->dhcp_cfg.domain = NULL;
-    st->dhcp_cfg.num_entry = (int)(sizeof(st->dhcp_entries) / sizeof(st->dhcp_entries[0]));
-    st->dhcp_cfg.entries = st->dhcp_entries;
-
-    err_t dh_err = dhserv_init(&st->dhcp_cfg);
-    if (dh_err != ERR_OK)
+    if (st->dhcps == NULL)
     {
-        ESP_LOGE(TAG, "DHCP server start failed: dhserv_init err=%d", (int)dh_err);
+        ESP_LOGE(TAG, "DHCP server start failed: dhcps_new returned NULL");
     }
     else
     {
-        ESP_LOGI(TAG, "DHCP server started on UDP/%u", (unsigned)st->dhcp_cfg.port);
+        ip_addr_t dns;
+
+        ip_addr_copy_from_ip4(dns, st->ipaddr);
+        dhcps_dns_setserver(st->dhcps, &dns);
+
+        dhcps_offer_t offer_dns = OFFER_DNS;
+        dhcps_set_option_info(st->dhcps, DOMAIN_NAME_SERVER, &offer_dns,
+                              sizeof(offer_dns));
+
+        dhcps_set_new_lease_cb(st->dhcps, usbnet_dhcps_lease_cb, NULL);
+
+        err_t dh_err = dhcps_start(st->dhcps, &st->usbnetif, st->ipaddr);
+        if (dh_err != ERR_OK)
+        {
+            ESP_LOGE(TAG, "DHCP server start failed: dhcps_start err=%d", (int)dh_err);
+        }
+        else
+        {
+            ESP_LOGI(TAG, "DHCP server started on UDP/67 (usbnet netif)");
+        }
     }
 
     st->lwip_started = true;
@@ -177,7 +200,10 @@ void usbnet_lwip_stop_in_tcpip(void *arg)
     }
 
     st->lwip_ready = false;
-    dhserv_free();
+    if (st->dhcps != NULL)
+    {
+        dhcps_stop(st->dhcps, &st->usbnetif);
+    }
 
     netif_set_link_down(&st->usbnetif);
     netif_set_down(&st->usbnetif);

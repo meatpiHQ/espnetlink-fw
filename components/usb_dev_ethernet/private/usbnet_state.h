@@ -6,7 +6,7 @@
 #include "lwip/netif.h"
 #include "lwip/ip4_addr.h"
 
-#include "dhserver.h"
+#include "dhcpserver/dhcpserver.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,8 +24,10 @@ typedef struct
     ip4_addr_t gw;
     ip4_addr_t upstream_dns;
 
-    dhcp_entry_t dhcp_entries[4];
-    dhcp_config_t dhcp_cfg;
+    /* IDF per-netif DHCP server (binds via udp_bind_netif, so it coexists
+     * with the WiFi AP's DHCP server on UDP/67 — TinyUSB's global dhserver
+     * could not). */
+    dhcps_t *dhcps;
 
     uint8_t hwaddr[6];
     uint8_t rndis_host_mac[6];

@@ -1,8 +1,11 @@
 # Name,   Type, SubType, Offset,  Size, Flags
-# Note: if you have increased the bootloader size, make sure to update the offsets to avoid overlap,,,,
-# Name,   Type, SubType, Offset,  Size, Flags
+# OTA layout: two 5M app slots (CDC `ota` command flashes the inactive one).
+# `settings` is the Settings Manager's dedicated LittleFS partition (standard
+# MEATPI_COMPONENT_STANDARD.md 4.4) - independent of the general `storage` FS.
 nvs,      data, nvs,      0x9000,  0x20000,
 otadata,  data, ota,      0x29000, 0x2000,
 phy_init, data, phy,      0x2B000, 0x1000,
-factory,  app,  factory,  0x30000, 5M,
+ota_0,    app,  ota_0,    0x30000, 5M,
+ota_1,    app,  ota_1,    ,        5M,
+settings, data, littlefs, ,        256K,
 storage,  data, littlefs, ,        4M,

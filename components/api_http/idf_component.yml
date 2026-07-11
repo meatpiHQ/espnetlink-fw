@@ -1,0 +1,3 @@
+## api_http has no managed dependencies (cJSON comes from the IDF v5.5
+## bundled `json` component; see CMakeLists).
+dependencies: {}

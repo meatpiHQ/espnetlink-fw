@@ -58,7 +58,7 @@
 
 #include "lte_upstream_pppos_usb.h"
 
-static const char *TAG = "lte_pppos_usb";
+static const char *TAG = "lte_upstream_pppos";
 
 /* =========================================================================
  * USB host daemon task

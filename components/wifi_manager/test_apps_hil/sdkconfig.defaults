@@ -1,0 +1,20 @@
+# Coding Standard rev 2.1 (§7): on-device test apps build against the MAIN
+# firmware's partition table — no private fork.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../../../wican_pro_partitions_table.csv"
+# Flash size matches the main firmware / WiCAN Pro hardware (16 MB).
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+# PSRAM config matches the main firmware sdkconfig (WiCAN Pro S3: octal, 80 MHz).
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+# PSRAM task stack for the reconnect task (standard §2, matches main firmware).
+CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
+# Test-only: compile DEBUG logs in so the bench can assert on reconnect/ban
+# lines (runtime default stays INFO; the HIL app raises wifi_manager only).
+CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y
+
+# Test-only override (Standard §7, sanctioned): the root defaults pin the
+# 2 Mbaud console; the serial-capture harness reads at 115200.
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200

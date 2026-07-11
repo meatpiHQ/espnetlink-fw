@@ -1,0 +1,4 @@
+## Managed component dependencies for wifi_manager.
+## cJSON comes from the IDF v5.5 bundled `json` component (PRIV_REQUIRES in
+## CMakeLists); the espressif/cjson managed component is IDF v6 only.
+dependencies: {}

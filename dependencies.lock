@@ -53,7 +53,7 @@ dependencies:
     - esp32h4
     version: 2.0.1~1
   espressif/i2c_bus:
-    component_hash: 4e990dc11734316186b489b362c61d41f23f79d58bc169795cec215e528cba14
+    component_hash: 483112c1619c54c38d0b734fb25f1678733267858a77b7af2f48cc7db6dbbd84
     dependencies:
     - name: espressif/cmake_utilities
       registry_url: https://components.espressif.com
@@ -65,7 +65,7 @@ dependencies:
     source:
       registry_url: https://components.espressif.com
       type: service
-    version: 1.5.0
+    version: 1.5.2
   espressif/icm42670:
     component_hash: fc8b20e588ef60e882d2980dcb041ee90574c4dc850e92c7a1941f1d32f65678
     dependencies:
@@ -81,7 +81,7 @@ dependencies:
       type: service
     version: 2.1.0
   espressif/sensor_hub:
-    component_hash: b3e72f3e2d10e165b972b17fff889f294b1a685769efacf73ec8f1e92152d1d5
+    component_hash: ea30db551c34aee2862482abf8b3164dd3855ecb4b4659b1e6878455c9cb9e22
     dependencies:
     - name: espressif/cmake_utilities
       registry_url: https://components.espressif.com
@@ -97,9 +97,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com
       type: service
-    version: 0.1.4
+    version: 0.1.5
   espressif/tinyusb:
-    component_hash: 5ea9d3b6d6b0734a0a0b3491967aa0e1bece2974132294dbda5dd2839b247bfa
+    component_hash: a40b7f67df6ac254a4afd96c6401cc56f2059ae747d6d7e66b568bca53ad0edc
     dependencies:
     - name: idf
       require: private
@@ -112,9 +112,10 @@ dependencies:
     - esp32s3
     - esp32p4
     - esp32h4
-    version: 0.19.0~2
+    - esp32s31
+    version: 0.19.0~3
   espressif/usb_host_cdc_acm:
-    component_hash: 71f9ae30021b1edb6f42980eb151ab24d0b602b8463861569a151b5254ba1e4b
+    component_hash: f3893a5e117c65f3c4d90d282bbb43624a2fec4144532e5c72223e69bd1b00e9
     dependencies:
     - name: idf
       require: private
@@ -134,8 +135,9 @@ dependencies:
     - esp32s3
     - esp32p4
     - esp32h4
+    - esp32s31
     - linux
-    version: 2.3.0
+    version: 2.4.0
   espressif/usb_host_ch34x_vcp:
     component_hash: cc6f17936a11aa0ba460e716bd9b70fcd445824bcc7882afbe3ede3513f80c59
     dependencies:
@@ -228,6 +230,6 @@ direct_dependencies:
 - idf
 - igrr/libnmea
 - joltwallet/littlefs
-manifest_hash: 59d64bd4e9c31656576dce2563ddb428f7e32d39e959065ef8b3bfb5032b60f6
+manifest_hash: e04ba3ae4beaf96ac43309100e6465a9619f943bca37a8878990acf35b39d1ac
 target: esp32s3
 version: 2.0.0
