@@ -16,11 +16,6 @@
 #include "esp_vfs.h"
 
 #include "gps.h"
-#include "imu.h"
-#include "lte_upstream_pppos.h"
-#include "config_manager.h"
-
-#include "usb_cli_commands.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -115,15 +110,12 @@ static void usb_cli_console_init_esp_console_once(void)
 #endif
     };
 
+    /* §6b: commands are registered by their OWNING components on the
+     * settings boot apply (cli gate) and by main_cli — nothing registers
+     * here. esp_console itself is normally initialized by
+     * cmdline_manager_init(); this stays as the standalone fallback. */
     (void)esp_console_init(&console_cfg);
-    esp_console_register_help_command();
-    usb_cli_register_console_commands();
-    usb_cli_ota_register();
-    gps_console_register();
-    imu_console_register();
-    lte_upstream_pppos_console_register();
-    config_manager_console_register();
-    agnss_console_register();
+    (void)esp_console_register_help_command();
 
     s_esp_console_inited = true;
 }
@@ -405,10 +397,10 @@ static void usb_cli_console_task(void *arg)
 
     printf("ESPNetLink console. Type 'help'.\n");
 
-    /* Auto-start GPS passthrough if persisted in config */
+    /* Auto-start GPS passthrough if persisted in settings */
     {
-        bool passthru = false;
-        config_get_bool("GPS_PASSTHRU", &passthru);
+        bool passthru = gps_settings_is_configured()
+                            ? gps_settings()->passthru : false;
         if (passthru)
         {
             (void)gps_init(false);

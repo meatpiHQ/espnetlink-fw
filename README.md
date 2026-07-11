@@ -80,6 +80,17 @@ The device exposes a USB CDC-ACM serial console. Connect at any baud rate and ty
 | `ver` | Print firmware version and ESP-IDF version |
 | `echo 0\|1` | Get or set device-side input echo |
 | `debug 0\|1` | Get or set global log output (0 = off, 1 = debug) |
+| `config list [-j]` | Print all configuration keys (add `-j` for JSON) |
+| `config get/set <KEY> [VAL]` | Read or persist one key (applies on next boot) |
+| `ota <size> [sha256]` | Firmware update over this console — see `tools/cdc_ota.py` |
+
+Firmware updates: `python tools/cdc_ota.py` streams the current build into
+the inactive OTA slot over this console (SHA-256 verified) and reboots —
+no bootloader/UART access needed after the first flash.
+
+The device also serves an HTTP settings API on the WiFi hotspot
+(`ESPNetLink_<id>` → `http://192.168.80.1/api/settings`) and over USB
+Ethernet (`http://192.168.7.1/...`) — see `components/HTTP_API.md`.
 
 ### 2.2 System
 

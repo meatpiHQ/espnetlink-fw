@@ -5,6 +5,7 @@
 
 #include "driver/i2c_master.h"
 #include "esp_console.h"
+#include "cmdline_manager.h"
 #include "esp_log.h"
 
 #include "freertos/FreeRTOS.h"
@@ -251,5 +252,5 @@ void imu_console_register(void)
         .hint    = "-i",
         .func    = &imu_cmd_handler,
     };
-    (void)esp_console_cmd_register(&cmd);
+    (void)cmdline_manager_register(&cmd);
 }

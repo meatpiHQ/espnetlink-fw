@@ -79,9 +79,25 @@ static bool s_ring_enabled = true;
 
 /* ---- built-in sinks ---------------------------------------------------------- */
 
+/* ESPNetLink port: global stdout is redirected to the USB CDC console
+ * (usb_cli_console), so writing stdout would interleave log lines into CLI
+ * responses (§6b byte-parity). The console sink therefore writes the REAL
+ * console device (UART0) directly; stdout is only the fallback. */
+static FILE *s_console_dev;
+
 static esp_err_t console_write(const char *line, size_t len)
 {
-    fwrite(line, 1, len, stdout);
+    if (s_console_dev == NULL)
+    {
+        s_console_dev = fopen("/dev/console", "w");
+        if (s_console_dev != NULL)
+        {
+            setvbuf(s_console_dev, NULL, _IONBF, 0);
+        }
+    }
+
+    fwrite(line, 1, len,
+           (s_console_dev != NULL) ? s_console_dev : stdout);
     return ESP_OK;
 }
 

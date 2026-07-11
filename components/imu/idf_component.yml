@@ -1,0 +1,3 @@
+## imu: ICM-42670 driver from the registry.
+dependencies:
+  espressif/icm42670: "^2.1.0"

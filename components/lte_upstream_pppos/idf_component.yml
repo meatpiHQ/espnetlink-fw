@@ -1,0 +1,4 @@
+## lte_upstream_pppos: esp_modem PPPoS/CMUX + optional BG95 USB DTE.
+dependencies:
+  espressif/esp_modem: "^2.0.0"
+  espressif/usb_host_cdc_acm: "^2"

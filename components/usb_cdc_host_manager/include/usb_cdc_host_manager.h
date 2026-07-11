@@ -2,7 +2,7 @@
  * @file usb_cdc_host_manager.h
  * @brief USB CDC Host Manager for multi-interface CDC-ACM devices
  *
- * This file is part of the WiCAN project.
+ * This file is part of the ESPNetLink project.
  *
  * Copyright (C) 2022  Meatpi Electronics.
  * Written by Ali Slim <ali@meatpi.com>

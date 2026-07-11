@@ -20,8 +20,8 @@ Tracked against `MEATPI_COMPONENT_STANDARD.md` rev 1.0. Updated 2026-07-11
 | Item | Status | Notes |
 |---|---|---|
 | PSRAM enabled (octal, bss/stack/noinit external, memtest off) | ✅ | Verified on device (8 MB pool) |
-| Task stacks static in PSRAM (xTaskCreateStatic + EXT_RAM_BSS_ATTR) | ✗ | 25+ legacy dynamic internal-RAM tasks to convert (ported core components already comply) |
-| cJSON heap → PSRAM hooks in main | ✗ | WiCAN main pattern; adopt with main cleanup |
+| Task stacks static in PSRAM (xTaskCreateStatic + EXT_RAM_BSS_ATTR) | ✅ | All long-lived singletons converted + verified (gps_parser, lte_monitor/sup, usbnet rx/evt/dns, main lte task). Deliberately internal/dynamic: usb_cli console (OTA flash writes, §2 corollary), agnss tasks (NVS flash ops), transient per-run tasks (speedtest, deep_sleep, lte_tsync — respawnable) |
+| cJSON heap → PSRAM hooks in main | ✅ | WiCAN pattern; verified running |
 
 ## §3 / §10 Component rules
 
@@ -37,38 +37,40 @@ Tracked against `MEATPI_COMPONENT_STANDARD.md` rev 1.0. Updated 2026-07-11
 
 | Item | Status | Notes |
 |---|---|---|
-| config_manager retired; keys per component | ✗ | Mapping fixed: lte_upstream_pppos ← APN/APN_USER/APN_PASS/APN_PIN/LTE_ENABLED/NCM_SHARE; gps ← GPS_PASSTHRU/GPS_UART0_OUT/AGNSS_ENABLED/AGNSS_CACHE_S; DEVICE_NAME/GPS_ENABLED unused (drop) |
-| Legacy /storage/config.json one-time import | ✗ | Field devices exist — import → settings_manager_set per component → rename marker → single reboot |
-| `config` CLI byte-parity over settings_manager | ✗ | Contract captured (list/-l [-j], get KEY, set KEY VAL, reset; exact formats in config_manager_console.c) |
+| config_manager retired; keys per component | ✅ | Descriptors: `lte_upstream_pppos` (enabled/apn/apn_user/apn_password/apn_pin/ncm_share/cli), `gps` (enabled/passthru/uart0_out/agnss_enabled/agnss_cache_s/cli), `system` (device_name). All call sites migrated (gps.c, agnss.c, agnss_console.c, usb_cli_console.c, main lte task). Component dir left in tree for `git rm` review |
+| Legacy /storage/config.json one-time import | ✅ | VERIFIED 2026-07-12 with a true field-upgrade simulation (old build → plant values → OTA new → values carried, one-time reboot). Bench-hit fixed en route: legacy file wraps keys in a `"config"` object — the first importer looked at the root and silently imported nothing |
+| `config` CLI byte-parity over settings_manager | ✅ | main_cli.c key-mapped view; verified on device: list / list -j / -l / get / set / reset formats identical; set is §4.2 reboot-to-apply (matches legacy read-at-boot semantics) |
+| CLI↔HTTP unification | ✅ | Verified: `config set NCM_SHARE false` → GET /api/settings/lte_upstream_pppos shows ncm_share:false + pending_reboot:true; reboot applies (boot log share_usb=no) |
 | AGNSS NVS cache (namespace "gnss") | ✅ n/a | Runtime cache, not settings — stays in NVS per standard |
 
 ## §6b CLI
 
 | Item | Status | Notes |
 |---|---|---|
-| Byte-identical commands/responses (`esp> `, OK/ERROR trailers) | ✅ | Preserved — no behavior change shipped |
-| Commands move to `<comp>_cli.c` + cmdline_manager_register, `cli` bool gate | ✗ | Currently central in usb_cli_console (+ per-comp console_register fns). Ported components' own CLIs (wifi, dev_status) already comply |
-| cmdline_manager ownership table | ✗ | With the CLI migration |
-| New: `ota` command | ✅ | usb_cli_ota.c + tools/cdc_ota.py (documented in PRODUCT.md; add to README CLI section) |
+| Byte-identical commands/responses (`esp> `, OK/ERROR trailers) | ✅ | Verified after every move (ver/echo/config/gps/agnss/system/lte sweeps) |
+| Commands register via cmdline_manager, owned per component, `cli` bool gate | ✅ | gps/agnss/lte register on their settings apply; imu + usb_cli_console got minimal {cli} descriptors; echo+ota live in usb_cli_console_cli.c/usb_cli_ota.c; composites (ver/debug/system/reboot/sleep/wake/ping/speedtest/config) moved to main/main_cli*.c; usb_cli_commands.c deleted |
+| cmdline_manager ownership table | ✅ | components/cmdline_manager/README.md (espnetlink table) |
+| Logs leaking into CDC responses | ✅ | log_manager console sink now writes /dev/console (UART0) directly instead of the CDC-redirected stdout |
+| New: `ota` command | ✅ | usb_cli_ota.c + tools/cdc_ota.py; documented in README §2.1 |
 
 ## §1 Style / §8 packaging
 
 | Item | Status | Notes |
 |---|---|---|
-| ≤700-line files | ✗ | lte_upstream_pppos.c 2009, modem_manager.c 1133, gps.c 971, usb_cli_commands.c 910, usb_cli_console.c ~870, config_manager.c 800 |
-| Allman everywhere | ◐ | Mixed in usb_dev_ethernet.c (dead), usb_cdc_host_manager.cpp, usb_dev_bridge.c |
-| README.md per component | ◐ | Ported components ship theirs; 12 legacy espnetlink components have none |
-| idf_component.yml / Kconfig per component | ◐ | Ported ✅; legacy ✗ |
-| Stale WiCAN GPL headers (modem_manager, usb_cdc_host_manager) | ✗ | Replace with product headers |
-| Dead code: usb_dev_descriptors (empty stub), usb_dev_ethernet.c (NCM variant) | ✗ | Delete or revive decision needed |
+| ≤700-line files | ✅* | All split by responsibility (verbatim byte-sliced moves, verified on device): gps.c 613 + gps_cli.c; modem_manager.c 550 + _probe.c 642; lte_upstream_pppos.c 696 + _cli.c 619 + _monitor.c 515 + _at.c 320. *Documented exception: usb_cli_console.c stays at 858 — the console task, line editor, GPS-stream escape state and TX ring share 9 statics with no clean responsibility seam (§1: "never split mid-logic just to hit the number") |
+| Allman everywhere | ✅ | usb_cdc_host_manager.cpp + usb_dev_bridge.c reformatted with the new repo-root .clang-format (Allman, 4-space, 100 col) |
+| README.md per component | ✅ | All 11 legacy/product components + all ported components |
+| idf_component.yml per component | ✅ | Every component declares its own managed deps (main's manifest retained) |
+| Stale WiCAN headers (modem_manager, usb_cdc_host_manager) | ✅ | Now say ESPNetLink |
+| Dead code | ✅ | usb_dev_descriptors stub files + usb_dev_ethernet.c (never-built NCM variant) deleted |
 
 ## §7 Tests
 
 | Item | Status | Notes |
 |---|---|---|
-| Host unit tests | ◐ | Ported core components include host_test/ suites (settings fields/schema/registry/codec, log ring, http matcher, wifi select, api_http utils are host-testable). Not yet wired to CI; not run on this Windows host |
-| pytest test_apps on main sdkconfig/partitions | ✗ | Ported test_apps still reference WiCAN's sdkconfig defaults — repoint per §7 |
-| Legacy component tests | ✗ | Only config_manager has any |
+| Host unit tests + CI | ✅* | `.github/workflows/host-tests.yml` builds + runs all 7 host_test suites (6 ported + new gps) on the IDF `linux` target (espressif/idf:v5.5.3 container) on every push/PR. *First green run pending a push (local smoke needs Docker Desktop started — daemon was down) |
+| pytest test_apps on main sdkconfig/partitions | ✅ | All 6 test_apps repointed: inherit repo-root sdkconfig.defaults (which now pins the espnetlink partition table + 16MB flash) + minimal test-only overlay |
+| Product-component test exemplar | ✅ | components/gps/host_test: gps settings descriptor against the REAL settings_manager registry + storage stub — schema defaults, range validation, reboot-to-apply semantics, §6b cli-gate (CLI register spies) |
 
 ## Known deviations (product addendum candidates)
 

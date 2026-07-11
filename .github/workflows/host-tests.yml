@@ -1,0 +1,37 @@
+# Standard §7: host-testable logic runs on the IDF `linux` target on every
+# push — no hardware in the loop. Each suite is an idf.py project under
+# components/<comp>/host_test whose built .elf exits non-zero on failure.
+name: host-tests
+
+on:
+  push:
+    branches: [main, refactor]
+  pull_request:
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    container: espressif/idf:v5.5.3
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - components/settings_manager/host_test
+          - components/log_manager/host_test
+          - components/cmdline_manager/host_test
+          - components/http_server_manager/host_test
+          - components/dev_status_manager/host_test
+          - components/wifi_manager/host_test
+          - components/gps/host_test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run ${{ matrix.suite }}
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          cd "${{ matrix.suite }}"
+          idf.py --preview set-target linux
+          idf.py build
+          elf="$(ls build/*.elf)"
+          echo "running $elf"
+          "$elf"

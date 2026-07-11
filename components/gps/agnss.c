@@ -32,7 +32,6 @@
 #include "freertos/task.h"
 
 #include "gps.h"
-#include "config_manager.h"
 #include "lte_upstream_pppos.h"
 
 #include <time.h>
@@ -551,7 +550,10 @@ static void cache_position_task(void *arg)
     int64_t last_save_ms = 0;
 
     int cache_s = CACHE_INTERVAL_DEFAULT_S;
-    config_get_int("AGNSS_CACHE_S", &cache_s);
+    if (gps_settings_is_configured())
+    {
+        cache_s = gps_settings()->agnss_cache_s;
+    }
     
     while (s_cache_task_running)
     {

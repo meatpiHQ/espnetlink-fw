@@ -128,7 +128,7 @@ dependencies:
       - if: target not in ["linux"]
       version: ^1.0.0
     source:
-      registry_url: https://components.espressif.com
+      registry_url: https://components.espressif.com/
       type: service
     targets:
     - esp32s2
@@ -223,6 +223,7 @@ direct_dependencies:
 - espressif/esp_modem
 - espressif/esp_tinyusb
 - espressif/icm42670
+- espressif/usb_host_cdc_acm
 - espressif/usb_host_ch34x_vcp
 - espressif/usb_host_cp210x_vcp
 - espressif/usb_host_ftdi_vcp
@@ -230,6 +231,6 @@ direct_dependencies:
 - idf
 - igrr/libnmea
 - joltwallet/littlefs
-manifest_hash: e04ba3ae4beaf96ac43309100e6465a9619f943bca37a8878990acf35b39d1ac
+manifest_hash: b99a5129057b4e3d905e00aa54ac621e39be03962e47271f20c188372c807c45
 target: esp32s3
 version: 2.0.0

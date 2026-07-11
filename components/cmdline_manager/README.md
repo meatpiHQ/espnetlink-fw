@@ -27,23 +27,23 @@ Interface rule: **legacy argtable3 options behave legacy-exact**
 summary (legacy bare was an error — nothing depended on it); v6
 additions are options too.
 
+**ESPNetLink ownership table** (every command keeps its legacy interface
+byte-alike — outputs + `OK`/`ERROR` trailers on the `esp> ` console):
+
 | Command | Owner |
 |---|---|
-| `help [cmd]` | cmdline_manager (the registry's own; legacy format) |
-| `version`, `status` | dev_status_manager |
-| `wifi -s/-i/--scan` | wifi_manager (`-s`/`-i` legacy-exact; `--scan` = v6 JSON scan) |
-| `rtc -s/-r/-i` | rtc_manager (sync/read legacy-exact; `-i` = responding probe — the RX8130 has no ID register) |
-| `imu -i/-r` | imu_manager (`-i` legacy-exact; `-r` + bare = v6 activity/accel/temp) |
-| `led -i/-c <r g b>/-b/-x` | led_manager (legacy set-color drives an ALERT-priority indication — the arbiter owns the LED; `-x/--clear` releases it) |
-| `battery` | battery_monitor (new in v6) |
-| `sdcard -i/-t` | external_storage (`-i` card name/type/capacity/sector/speed from its own sdmmc data; `-t` write/read-back self-test) |
-| `fs` | filesystem (per-backend usage: /data, /sd) |
-| `restart_tracker -l/-a/-p/-n/--panic` | restart_tracker (`--panic` = deliberate test panic; v6 flags print as hex) |
-| `system -v/-r/-i/-m/-t` | **main_cli.c** — a composite (battery voltage + restart_tracker reboot + dev_status info/memory/tasks); only main knows all of them (`-t/--tasks` is the v6 addition) |
-| `debug -e <0\|1>` or `debug <tag> <level>` | **main_cli.c** — log_manager sits BELOW cmdline_manager; registering there would be a dependency cycle (same reason /api/logs lives in api_http). `-e` legacy-alike but EPHEMERAL (persist via `/api/settings/log_manager`) |
-| `factoryreset [-c/--confirm]` | **main_cli.c** — REAL since 2026-07-05: legacy two-step confirm flow (60 s window) -> `settings_manager_factory_reset()` (settings partition only; /data + SD untouched) -> reboot via restart_tracker `FACTORY_RESET` |
-| `autopid [-l]` | autopid (self-registered on settings apply, §6b; bare = status/tables/poll counters, `-l` adds per-parameter latest values + age) |
-| `eth`, `conn`, `espnetlink`, `wusb`, `ping` | **main_cli.c** pending stubs — no v6 backer yet; only the composition root knows what's missing |
+| `help [cmd]` | cmdline_manager (the registry's own) |
+| `wifi` | wifi_manager (`wifi_manager_cli.c`, self-registered on settings apply) |
+| `version`, `status` | dev_status_manager (`dev_status_manager_cli.c`) |
+| `gps -p/-s/-t/-U/-c/-P` | gps (registered on the `gps` settings apply, `cli` gate) |
+| `agnss -s/-v/-e/-d/-i/-x` | gps (agnss_console.c, same `cli` gate) |
+| `lte -s/-r/-n/-p/-o/-i/-q/-j` | lte_upstream_pppos (registered on its settings apply, `cli` gate) |
+| `imu` | imu (registered on the `imu` {cli} settings apply) |
+| `echo 0\|1` | usb_cli_console (`usb_cli_console_cli.c` — device-side echo is this transport's own knob) |
+| `ota <size> [sha256]` | usb_cli_console (`usb_cli_ota.c` — firmware update over this console) |
+| `config list/get/set/reset` | **main/main_cli.c** — legacy-parity view over the settings_manager descriptors |
+| `ver`, `debug 0\|1`, `system -v/-i/-s`, `reboot`, `sleep 1..4`, `wake` | **main/main_cli_system.c** — composites spanning gps/imu/lte/usb/log |
+| `ping`, `speedtest` | **main/main_cli_net.c** — composites over the LTE uplink |
 
 `help` output follows the legacy format (`Available commands:` +
 `cmd - help` + indented `Usage:` hints + `Tip:`/`OK`; `help <cmd>` for

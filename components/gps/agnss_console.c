@@ -27,7 +27,7 @@
 #include <string.h>
 
 #include "esp_console.h"
-#include "config_manager.h"
+#include "cmdline_manager.h"
 
 static bool s_registered = false;
 
@@ -50,7 +50,7 @@ static int cmd_agnss(int argc, char **argv)
     if (strcmp(sub, "-s") == 0 || strcmp(sub, "status") == 0)
     {
         bool enabled = true;
-        config_get_bool("AGNSS_ENABLED", &enabled);
+        (void)gps_settings_pending_bool("agnss_enabled", &enabled);
         printf("AGNSS: %s\n", enabled ? "enabled" : "disabled");
 
         bool time_ok = false, pos_ok = false;
@@ -87,16 +87,14 @@ static int cmd_agnss(int argc, char **argv)
 
     if (strcmp(sub, "-e") == 0 || strcmp(sub, "enable") == 0)
     {
-        config_set_bool("AGNSS_ENABLED", true);
-        config_save();
+        (void)gps_settings_persist_bool("agnss_enabled", true);
         printf("AGNSS enabled (takes effect on next boot).\n");
         return 0;
     }
 
     if (strcmp(sub, "-d") == 0 || strcmp(sub, "disable") == 0)
     {
-        config_set_bool("AGNSS_ENABLED", false);
-        config_save();
+        (void)gps_settings_persist_bool("agnss_enabled", false);
         printf("AGNSS disabled (takes effect on next boot).\n");
         return 0;
     }
@@ -111,14 +109,13 @@ static int cmd_agnss(int argc, char **argv)
                 printf("Minimum interval is 10 seconds.\n");
                 return 1;
             }
-            config_set_int("AGNSS_CACHE_S", val);
-            config_save();
+            (void)gps_settings_persist_int("agnss_cache_s", val);
             printf("Cache interval set to %d s.\n", val);
         }
         else
         {
             int cur = 120;
-            config_get_int("AGNSS_CACHE_S", &cur);
+            (void)gps_settings_pending_int("agnss_cache_s", &cur);
             printf("Cache interval: %d s\n", cur);
         }
         return 0;
@@ -161,6 +158,6 @@ void agnss_console_register(void)
         .func = &cmd_agnss,
     };
 
-    (void)esp_console_cmd_register(&cmd);
+    (void)cmdline_manager_register(&cmd);
     s_registered = true;
 }

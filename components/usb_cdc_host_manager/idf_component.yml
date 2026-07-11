@@ -1,0 +1,6 @@
+## usb_cdc_host_manager: USB-host VCP drivers from the registry.
+dependencies:
+  espressif/usb_host_vcp: "^1"
+  espressif/usb_host_ch34x_vcp: "^2"
+  espressif/usb_host_cp210x_vcp: "^2"
+  espressif/usb_host_ftdi_vcp: "^2"

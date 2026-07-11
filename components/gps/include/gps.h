@@ -100,6 +100,40 @@ esp_err_t agnss_try_inject_time(void);
  */
 void agnss_console_register(void);
 
+/* -----------------------------------------------------------------------
+ * Settings (standard §4.1: descriptor "gps" in gps_settings.c)
+ * ----------------------------------------------------------------------- */
+
+/** Boot-applied configuration (reboot-to-apply; §4.2). */
+typedef struct
+{
+    bool enabled;       /* legacy GPS_ENABLED (reserved; not actuated yet) */
+    bool passthru;      /* legacy GPS_PASSTHRU  — NMEA passthrough console */
+    bool uart0_out;     /* legacy GPS_UART0_OUT — NMEA copy on UART0       */
+    bool agnss_enabled; /* legacy AGNSS_ENABLED                            */
+    int  agnss_cache_s; /* legacy AGNSS_CACHE_S — position cache interval  */
+    bool cli;           /* §6b gate for this component's console commands  */
+} gps_settings_t;
+
+/** Register the "gps" settings descriptor. Called by main between
+ *  settings_manager_init() and settings_manager_start(). */
+esp_err_t gps_register_settings(void);
+
+/** Boot-applied settings (valid after the settings apply pass). */
+const gps_settings_t *gps_settings(void);
+bool gps_settings_is_configured(void);
+
+/** Persist one field (validate + store; applies NEXT boot — §4.2).
+ *  Used by the gps/agnss CLI commands. */
+esp_err_t gps_settings_persist_bool(const char *field, bool value);
+esp_err_t gps_settings_persist_int(const char *field, int value);
+
+/** Read one field's PENDING (persisted) value — what the next boot will
+ *  apply. Query paths use these so a set-then-get sequence behaves like
+ *  the legacy in-memory config did. */
+esp_err_t gps_settings_pending_bool(const char *field, bool *out);
+esp_err_t gps_settings_pending_int(const char *field, int *out);
+
 #ifdef __cplusplus
 }
 #endif

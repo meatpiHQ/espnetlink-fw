@@ -118,6 +118,31 @@ void lte_upstream_pppos_mark_time_synced(void);
 // Register the `lte` console command. Called by usb_cli_console.
 void lte_upstream_pppos_console_register(void);
 
+/* -----------------------------------------------------------------------
+ * Settings (standard §4.1: descriptor "lte_upstream_pppos" in
+ * lte_upstream_pppos_settings.c)
+ * ----------------------------------------------------------------------- */
+
+/** Boot-applied configuration (reboot-to-apply; §4.2). */
+typedef struct
+{
+    bool enabled;           /* legacy LTE_ENABLED */
+    char apn[64];           /* legacy APN         */
+    char apn_user[33];      /* legacy APN_USER    */
+    char apn_password[33];  /* legacy APN_PASS    */
+    char apn_pin[9];        /* legacy APN_PIN     */
+    bool ncm_share;         /* legacy NCM_SHARE   */
+    bool cli;               /* §6b console-commands gate */
+} lte_upstream_pppos_settings_t;
+
+/** Register the "lte_upstream_pppos" settings descriptor. Called by main
+ *  between settings_manager_init() and settings_manager_start(). */
+esp_err_t lte_upstream_pppos_register_settings(void);
+
+/** Boot-applied settings (valid after the settings apply pass). */
+const lte_upstream_pppos_settings_t *lte_upstream_pppos_settings(void);
+bool lte_upstream_pppos_settings_is_configured(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -1,9 +1,13 @@
 idf_component_register(
     SRCS "lte_upstream_pppos.c"
+         "lte_upstream_pppos_cli.c"
+         "lte_upstream_pppos_monitor.c"
+         "lte_upstream_pppos_at.c"
          "lte_upstream_pppos_usb.cpp"
+         "lte_upstream_pppos_settings.c"
     INCLUDE_DIRS "include"
     REQUIRES esp_netif esp_event freertos modem_manager esp_modem usb_dev_ethernet console
-             espressif__usb_host_cdc_acm json
+             espressif__usb_host_cdc_acm json settings_manager cmdline_manager
     PRIV_REQUIRES driver hw_config usb
 )
 

@@ -1,0 +1,16 @@
+# MeatPi Component Standard §1: Allman braces, 4-space indent, 100 cols.
+# Applied to new/touched code — do not mass-reformat history.
+BasedOnStyle: LLVM
+Language: Cpp
+BreakBeforeBraces: Allman
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 100
+PointerAlignment: Right
+AlignConsecutiveMacros: true
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+KeepEmptyLinesAtTheStartOfBlocks: false
+SortIncludes: false

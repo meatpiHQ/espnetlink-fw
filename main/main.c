@@ -14,15 +14,21 @@
 
 #include "hw_config.h"
 #include "filesystem.h"
-#include "config_manager.h"
 #include "gps.h"
 #include "imu.h"
+#include "usb_cli_console.h"
+
+#include "main_compose.h"
 
 #include "nvs.h"
 #include "nvs_flash.h"
 
+#include "esp_attr.h"
 #include "esp_event.h"
+#include "esp_heap_caps.h"
 #include "esp_netif.h"
+
+#include "cJSON.h"
 
 #include "api_http.h"
 #include "cmdline_manager.h"
@@ -74,33 +80,23 @@ static void lte_upstream_task(void *arg)
 {
     (void)arg;
 
-    /* Load LTE configuration from config_manager (config.json / schema defaults) */
-    bool lte_enabled = true;
-    config_get_bool("LTE_ENABLED", &lte_enabled);
-    if (!lte_enabled)
+    /* Boot-applied LTE configuration (settings_manager descriptor
+     * "lte_upstream_pppos", reboot-to-apply §4.2). */
+    const lte_upstream_pppos_settings_t *lte = lte_upstream_pppos_settings();
+
+    if (!lte_upstream_pppos_settings_is_configured() || !lte->enabled)
     {
         ESP_LOGI(TAG, "LTE disabled in config – skipping LTE upstream");
         vTaskDelete(NULL);
         return;
     }
 
-    static char cfg_apn[64];
-    static char cfg_user[32];
-    static char cfg_pass[32];
-    static char cfg_pin[8];
-
-    bool ncm_sharing = false;
-    config_get_bool("NCM_SHARE", &ncm_sharing);
-
-    config_get_str("APN",      cfg_apn,  sizeof(cfg_apn));
-    config_get_str("APN_USER", cfg_user, sizeof(cfg_user));
-    config_get_str("APN_PASS", cfg_pass, sizeof(cfg_pass));
-    config_get_str("APN_PIN",  cfg_pin,  sizeof(cfg_pin));
+    bool ncm_sharing = lte->ncm_share;
 
     ESP_LOGI(TAG, "LTE config: APN='%s' user='%s' pin=%s",
-             cfg_apn,
-             cfg_user[0] ? cfg_user : "(none)",
-             cfg_pin[0]  ? "(set)"  : "(none)");
+             lte->apn,
+             lte->apn_user[0] ? lte->apn_user : "(none)",
+             lte->apn_pin[0]  ? "(set)"       : "(none)");
 
     const lte_upstream_pppos_config_t cfg = {
         .modem = {
@@ -115,10 +111,10 @@ static void lte_upstream_task(void *arg)
             .status_on_is_low = true,
         },
 
-        .apn  = cfg_apn,
-        .user = cfg_user[0] ? cfg_user : NULL,
-        .pass = cfg_pass[0] ? cfg_pass : NULL,
-        .pin  = cfg_pin[0]  ? cfg_pin  : NULL,
+        .apn  = lte->apn,
+        .user = lte->apn_user[0]     ? lte->apn_user     : NULL,
+        .pass = lte->apn_password[0] ? lte->apn_password : NULL,
+        .pin  = lte->apn_pin[0]      ? lte->apn_pin      : NULL,
 
         .init_modem_manager = true,
         .baud_rate = 3000000,
@@ -210,6 +206,23 @@ static void iface_tx_task(void *arg)
 }
 #endif // USB_HOST_MODE
 
+/* ---- cJSON heap -> PSRAM (standard §2; WiCAN main pattern) ------------------
+ * Internal RAM is the scarce resource; JSON is the settings/API lingua franca
+ * and its trees live long. cJSON is only touched from task context, so ALL of
+ * it belongs in PSRAM. Falls back to the default heap when PSRAM is
+ * exhausted. */
+static void *cjson_psram_malloc(size_t n)
+{
+    void *p = heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+
+    return (p != NULL) ? p : malloc(n);
+}
+
+static void cjson_psram_free(void *p)
+{
+    free(p); /* heap_caps pointers free through the same allocator */
+}
+
 /** Init/register one step. NEVER panics: a deterministic init failure under
  *  ESP_ERROR_CHECK would be a permanent boot loop — the one thing a field
  *  device must never do (standard §3). A failed init leaves that component
@@ -243,6 +256,15 @@ static bool start_component(const char *name, esp_err_t (*start_fn)(void))
 
 void app_main(void)
 {
+    /* BEFORE any component init: every cJSON allocation firmware-wide goes
+     * through the PSRAM-first hooks. */
+    static const cJSON_Hooks CJSON_PSRAM =
+    {
+        .malloc_fn = cjson_psram_malloc,
+        .free_fn = cjson_psram_free,
+    };
+
+    cJSON_InitHooks((cJSON_Hooks *)&CJSON_PSRAM);
 
     // Log reset and wakeup reason at boot time, before any long startup delays.
     esp_sleep_wakeup_cause_t wakeup = esp_sleep_get_wakeup_cause();
@@ -370,22 +392,27 @@ void app_main(void)
     init_step("wifi_manager_init", wifi_manager_init);
     init_step("cmdline_manager_init", cmdline_manager_init);
     init_step("api_http_init", api_http_init);
+    /* product components register their settings descriptors (§4.1);
+     * their console commands register from the settings boot apply,
+     * gated by each component's `cli` setting (§6b) */
+    init_step("lte_upstream_pppos_register_settings",
+              lte_upstream_pppos_register_settings);
+    init_step("gps_register_settings", gps_register_settings);
+    init_step("imu_register_settings", imu_register_settings);
+    init_step("usb_cli_console_register_settings",
+              usb_cli_console_register_settings);
+    init_step("main_register_settings", main_register_settings);
+    /* composite CLI commands owned by main (§6b): `config` */
+    init_step("main_cli_register", main_cli_register);
     init_step("wifi_manager_register_http", wifi_manager_register_http);
     (void)http_server_manager_set_request_gate(
         wifi_manager_http_request_allowed);
 
     filesystem_init();
 
-    config_manager_init();
-
-    // Initialize GPS UART + parser task early so fix data is collected from boot
-    bool agnss_enabled = true;
-    config_get_bool("AGNSS_ENABLED", &agnss_enabled);
-    esp_err_t gps_err = gps_init(agnss_enabled);
-    if (gps_err != ESP_OK)
-    {
-        ESP_LOGE(TAG, "GPS init failed: %s", esp_err_to_name(gps_err));
-    }
+    /* config_manager retired: persistence lives in settings_manager (§4);
+     * gps_init moved below the settings apply pass (its config now comes
+     * from the "gps" descriptor). */
 
     // Initialize IMU (ICM42670) over I2C
     esp_err_t imu_err = imu_init();
@@ -486,6 +513,18 @@ void app_main(void)
     /* ---- the ONE settings apply pass (§4.3), then start the core --------- */
     init_step("settings_manager_start", settings_manager_start);
     init_step("log_manager_start", log_manager_start);
+
+    /* one-time legacy config.json import (reboots once when it changes
+     * anything, so field devices keep their configuration) */
+    main_legacy_import_run();
+
+    // GPS after the settings apply: its config is the "gps" descriptor
+    esp_err_t gps_err = gps_init(gps_settings()->agnss_enabled);
+    if (gps_err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "GPS init failed: %s", esp_err_to_name(gps_err));
+    }
+
     start_component("wifi_manager", wifi_manager_start);
     start_component("http_server_manager", http_server_manager_start);
     start_component("cmdline_manager", cmdline_manager_start);
@@ -497,9 +536,13 @@ void app_main(void)
     /* Pinned to core 1: uart_driver_install allocates its interrupt on the
      * calling core, and core 0's interrupt slots are exhausted now that
      * esp_wifi is composed (bench-hit 2026-07-11: esp_modem UART DTE
-     * install failed with ESP_FAIL right after the wifi stack came up). */
-    (void)xTaskCreatePinnedToCore(lte_upstream_task, "lte_pppos", 6144, NULL,
-                                  5, NULL, 1);
+     * install failed with ESP_FAIL right after the wifi stack came up).
+     * §2: static stack in PSRAM (config + esp_modem setup — no flash). */
+    static StaticTask_t s_lte_tcb;
+    static StackType_t s_lte_stack[6144] EXT_RAM_BSS_ATTR;
+
+    (void)xTaskCreateStaticPinnedToCore(lte_upstream_task, "lte_pppos", 6144,
+                                        NULL, 5, s_lte_stack, &s_lte_tcb, 1);
 #endif
     #endif
     // Optionally, you can still use interface 0 independently as before

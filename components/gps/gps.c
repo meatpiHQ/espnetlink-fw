@@ -9,7 +9,7 @@
 #include "driver/gpio.h"
 #include "driver/uart.h"
 
-#include "esp_console.h"
+#include "esp_attr.h"
 #include "esp_err.h"
 #include "esp_idf_version.h"
 #include "freertos/FreeRTOS.h"
@@ -19,8 +19,8 @@
 
 #include "soc/uart_channel.h"
 
-#include "config_manager.h"
 #include "hw_config.h"
+#include "gps_internal.h"
 
 /* Internal AGNSS init — implemented in agnss.c (same component) */
 esp_err_t agnss_init(bool enabled);
@@ -53,7 +53,6 @@ typedef struct
 } gps_fix_t;
 
 static bool s_inited = false;
-static bool s_cmd_registered = false;
 
 static volatile bool s_streaming_usb = false;
 static volatile bool s_streaming_uart0 = false;
@@ -79,12 +78,7 @@ static QueueHandle_t s_pair_queue;
 static EventGroupHandle_t s_gps_evt;
 static TaskHandle_t s_gps_parser_task;
 
-static void gps_print_usage(void)
-{
-    printf("Usage: gps -p [-j] | gps -s | gps -t [0|1] | gps -U [0|1] | gps -c | gps -P [0|1]\n");
-}
-
-static esp_err_t gps_uart0_prepare(void)
+esp_err_t gps_uart0_prepare(void)
 {
     uart_config_t cfg = {
         .baud_rate = GPS_UART0_BAUD_RATE,
@@ -157,8 +151,9 @@ static void gps_uart0_write_sentence(const char *data, size_t len)
 static void gps_apply_persisted_uart0_output(void)
 {
     bool enabled = false;
-    if (config_get_bool("GPS_UART0_OUT", &enabled) == ESP_OK)
+    if (gps_settings_is_configured())
     {
+        enabled = gps_settings()->uart0_out;
         if (enabled)
         {
             enabled = (gps_uart0_prepare() == ESP_OK);
@@ -167,7 +162,7 @@ static void gps_apply_persisted_uart0_output(void)
     }
 }
 
-static void gps_set_uart0_output(bool enabled)
+void gps_set_uart0_output(bool enabled)
 {
     if (enabled)
     {
@@ -180,12 +175,12 @@ static void gps_set_uart0_output(bool enabled)
     s_streaming_uart0 = enabled;
 }
 
-static bool gps_is_uart0_output_enabled(void)
+bool gps_is_uart0_output_enabled(void)
 {
     return s_streaming_uart0;
 }
 
-static esp_err_t gps_power_pin_set(bool enabled)
+esp_err_t gps_power_pin_set(bool enabled)
 {
     esp_err_t err = gpio_reset_pin(GPS_PWR_EN_PIN);
     if (err != ESP_OK)
@@ -202,7 +197,7 @@ static esp_err_t gps_power_pin_set(bool enabled)
     return gpio_set_level(GPS_PWR_EN_PIN, enabled ? 1 : 0);
 }
 
-static bool gps_power_pin_is_enabled(void)
+bool gps_power_pin_is_enabled(void)
 {
     return gpio_get_level(GPS_PWR_EN_PIN) != 0;
 }
@@ -493,16 +488,22 @@ esp_err_t gps_init(bool enable_agnss)
         s_gps_evt = xEventGroupCreate();
     }
 
-    BaseType_t task_ok;
+    /* §2: static stack in PSRAM (parser does UART + NMEA only — no flash
+     * writes). TCB stays internal (FreeRTOS object). */
+    static StaticTask_t s_parser_tcb;
+    static StackType_t s_parser_stack[GPS_PARSER_TASK_STACK] EXT_RAM_BSS_ATTR;
+
 #if CONFIG_FREERTOS_UNICORE
-    task_ok = xTaskCreate(gps_parser_task, "gps_parser", GPS_PARSER_TASK_STACK,
-                          NULL, GPS_PARSER_TASK_PRIO, &s_gps_parser_task);
+    s_gps_parser_task = xTaskCreateStatic(gps_parser_task, "gps_parser",
+                                          GPS_PARSER_TASK_STACK, NULL,
+                                          GPS_PARSER_TASK_PRIO,
+                                          s_parser_stack, &s_parser_tcb);
 #else
-    task_ok = xTaskCreatePinnedToCore(gps_parser_task, "gps_parser",
-                                      GPS_PARSER_TASK_STACK, NULL,
-                                      GPS_PARSER_TASK_PRIO, &s_gps_parser_task, 1);
+    s_gps_parser_task = xTaskCreateStaticPinnedToCore(
+        gps_parser_task, "gps_parser", GPS_PARSER_TASK_STACK, NULL,
+        GPS_PARSER_TASK_PRIO, s_parser_stack, &s_parser_tcb, 1);
 #endif
-    if (task_ok != pdPASS)
+    if (s_gps_parser_task == NULL)
     {
         return ESP_ERR_NO_MEM;
     }
@@ -570,108 +571,6 @@ bool gps_is_streaming(void)
     return s_streaming_usb || s_streaming_uart0;
 }
 
-static void gps_print_last_fix(bool json)
-{
-    gps_fix_t snap = {0};
-
-    if (xSemaphoreTake(s_fix_lock, pdMS_TO_TICKS(100)) == pdTRUE)
-    {
-        snap = s_fix;
-        xSemaphoreGive(s_fix_lock);
-    }
-
-    uint32_t now_ms = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
-
-    bool agnss_enabled = false;
-    config_get_bool("AGNSS_ENABLED", &agnss_enabled);
-
-    bool time_inj = false, pos_inj = false;
-    agnss_get_status(&time_inj, &pos_inj);
-
-    double cached_lat = 0, cached_lon = 0, cached_alt = 0;
-    bool has_cached = (agnss_nvs_read_position(&cached_lat, &cached_lon,
-                                               &cached_alt) == ESP_OK);
-
-    if (!snap.has_fix)
-    {
-        if (json)
-        {
-            printf("{\"valid\":false,\"has_fix\":false,"
-                   "\"agnss_enabled\":%s,\"time_injected\":%s,"
-                   "\"position_injected\":%s",
-                   agnss_enabled ? "true" : "false",
-                   time_inj ? "true" : "false",
-                   pos_inj ? "true" : "false");
-            if (has_cached)
-            {
-                printf(",\"cached_lat\":%.6f,\"cached_lon\":%.6f,"
-                       "\"cached_alt\":%.1f",
-                       cached_lat, cached_lon, cached_alt);
-            }
-            printf("}\n");
-        }
-        else
-        {
-            printf("No GPS fix parsed yet.\n");
-        }
-        return;
-    }
-
-    uint32_t age_ms = now_ms - snap.last_update_ms;
-
-    if (json)
-    {
-        printf("{\"valid\":%s,\"lat\":%.7f,\"lon\":%.7f,"
-               "\"satellites\":%d,\"sats_in_view\":%d,"
-               "\"fix_quality\":%d,\"fix_type\":%d,"
-               "\"altitude_m\":%.1f,"
-               "\"hdop\":%.1f,\"pdop\":%.1f,\"vdop\":%.1f,"
-               "\"speed_knots\":%.2f,\"speed_kmph\":%.2f,"
-               "\"course_deg\":%.2f,\"age_ms\":%u,"
-               "\"agnss_enabled\":%s,\"time_injected\":%s,"
-               "\"position_injected\":%s",
-               snap.valid ? "true" : "false",
-               snap.lat, snap.lon,
-               snap.satellites, snap.sats_in_view,
-               snap.fix_quality, snap.fix_type,
-               snap.altitude_m,
-               snap.hdop, snap.pdop, snap.vdop,
-               snap.speed_knots, snap.speed_kmph,
-               snap.course_deg, (unsigned)age_ms,
-               agnss_enabled ? "true" : "false",
-               time_inj ? "true" : "false",
-               pos_inj ? "true" : "false");
-        if (has_cached)
-        {
-            printf(",\"cached_lat\":%.6f,\"cached_lon\":%.6f,"
-                   "\"cached_alt\":%.1f",
-                   cached_lat, cached_lon, cached_alt);
-        }
-        printf("}\n");
-    }
-    else
-    {
-        printf(
-            "valid=%d lat=%.7f lon=%.7f sat=%d/%d fixq=%d type=%d alt=%.1fm "
-            "hdop=%.1f pdop=%.1f vdop=%.1f spd=%.2fkn/%.1fkm/h crs=%.2fdeg age=%ums\n",
-            snap.valid,
-            snap.lat, snap.lon,
-            snap.satellites, snap.sats_in_view,
-            snap.fix_quality, snap.fix_type,
-            snap.altitude_m,
-            snap.hdop, snap.pdop, snap.vdop,
-            snap.speed_knots, snap.speed_kmph,
-            snap.course_deg,
-            (unsigned)age_ms);
-    }
-}
-
-// Weak symbol implemented by usb_cli_console so GPS component can switch input mode.
-__attribute__((weak)) void usb_cli_console_set_gps_stream_mode(bool enabled)
-{
-    (void)enabled;
-}
-
 esp_err_t gps_get_fix(gps_fix_snapshot_t *out)
 {
     if (!out)
@@ -711,261 +610,3 @@ esp_err_t gps_get_fix(gps_fix_snapshot_t *out)
     return out->has_fix ? ESP_OK : ESP_ERR_INVALID_STATE;
 }
 
-static int cmd_gps(int argc, char **argv)
-{
-    bool opt_stream = false;
-    bool opt_print = false;
-    bool opt_json = false;
-    bool opt_passthru = false;
-    bool opt_uart0 = false;
-    bool opt_check = false;
-    bool opt_power = false;
-
-    for (int i = 1; i < argc; i++)
-    {
-        if (strcmp(argv[i], "-s") == 0)
-        {
-            opt_stream = true;
-        }
-        else if (strcmp(argv[i], "-p") == 0)
-        {
-            opt_print = true;
-        }
-        else if (strcmp(argv[i], "-j") == 0)
-        {
-            opt_json = true;
-        }
-        else if (strcmp(argv[i], "-t") == 0)
-        {
-            opt_passthru = true;
-            if (i + 1 < argc && argv[i + 1][0] != '-')
-            {
-                i++;
-            }
-        }
-        else if (strcmp(argv[i], "-U") == 0)
-        {
-            opt_uart0 = true;
-            if (i + 1 < argc && argv[i + 1][0] != '-')
-            {
-                i++;
-            }
-        }
-        else if (strcmp(argv[i], "-c") == 0)
-        {
-            opt_check = true;
-        }
-        else if (strcmp(argv[i], "-P") == 0)
-        {
-            opt_power = true;
-            if (i + 1 < argc && argv[i + 1][0] != '-')
-            {
-                i++;
-            }
-        }
-        else
-        {
-            gps_print_usage();
-            return 1;
-        }
-    }
-
-    if (opt_power)
-    {
-        int idx = -1;
-        for (int i = 1; i < argc; i++)
-        {
-            if (strcmp(argv[i], "-P") == 0 && i + 1 < argc)
-            {
-                idx = i + 1;
-                break;
-            }
-        }
-
-        if (idx < 0)
-        {
-            printf("GPS power: %s\n", gps_power_pin_is_enabled() ? "on" : "off");
-            return 0;
-        }
-
-        int val = atoi(argv[idx]);
-        if (val != 0 && val != 1)
-        {
-            printf("Usage: gps -P [0|1]\n");
-            return 1;
-        }
-
-        if (val != 0)
-        {
-            esp_err_t err = gps_init(false);
-            if (err != ESP_OK)
-            {
-                printf("GPS power on failed: %s\n", esp_err_to_name(err));
-                return 1;
-            }
-        }
-        else
-        {
-            gps_set_streaming(false);
-            usb_cli_console_set_gps_stream_mode(false);
-        }
-
-        esp_err_t err = gps_power_pin_set(val != 0);
-        if (err != ESP_OK)
-        {
-            printf("GPS power change failed: %s\n", esp_err_to_name(err));
-            return 1;
-        }
-
-        printf("GPS power: %s\n", val != 0 ? "on" : "off");
-        return 0;
-    }
-
-    if (opt_uart0)
-    {
-        int idx = -1;
-        for (int i = 1; i < argc; i++)
-        {
-            if (strcmp(argv[i], "-U") == 0 && i + 1 < argc)
-            {
-                idx = i + 1;
-                break;
-            }
-        }
-
-        if (idx < 0)
-        {
-            printf("GPS UART0 routing: %s\n",
-                   gps_is_uart0_output_enabled() ? "enabled" : "disabled");
-            return 0;
-        }
-
-        int val = atoi(argv[idx]);
-        if (val != 0 && val != 1)
-        {
-            printf("Usage: gps -U [0|1]\n");
-            return 1;
-        }
-
-        bool enable = (val != 0);
-        esp_err_t err = config_set_bool("GPS_UART0_OUT", enable);
-        if (err != ESP_OK)
-        {
-            printf("GPS UART0 routing update failed: %s\n", esp_err_to_name(err));
-            return 1;
-        }
-
-        err = config_save();
-        if (err != ESP_OK)
-        {
-            printf("GPS UART0 routing save failed: %s\n", esp_err_to_name(err));
-            return 1;
-        }
-
-        if (enable)
-        {
-            err = gps_init(false);
-            if (err != ESP_OK)
-            {
-                printf("GPS UART0 routing enable failed: %s\n", esp_err_to_name(err));
-                return 1;
-            }
-
-            err = gps_uart0_prepare();
-            if (err != ESP_OK)
-            {
-                printf("GPS UART0 prepare failed: %s\n", esp_err_to_name(err));
-                return 1;
-            }
-        }
-
-        gps_set_uart0_output(enable);
-        printf("GPS UART0 routing %s (persistent).\n",
-               enable ? "enabled" : "disabled");
-        return 0;
-    }
-
-    if (opt_check)
-    {
-        (void)gps_init(false);
-        bool ok = gps_is_functional(2000);
-        printf("GPS UART: %s\n", ok ? "receiving data" : "no data");
-        return ok ? 0 : 1;
-    }
-
-    if (opt_passthru)
-    {
-        /* gps -t       → show current state
-         * gps -t 0|1   → set and persist */
-        int idx = -1;
-        for (int i = 1; i < argc; i++)
-        {
-            if (strcmp(argv[i], "-t") == 0 && i + 1 < argc)
-            {
-                idx = i + 1;
-                break;
-            }
-        }
-        if (idx < 0)
-        {
-            bool cur = false;
-            config_get_bool("GPS_PASSTHRU", &cur);
-            printf("GPS passthrough: %s\n", cur ? "enabled" : "disabled");
-            return 0;
-        }
-        int val = atoi(argv[idx]);
-        bool enable = (val != 0);
-        config_set_bool("GPS_PASSTHRU", enable);
-        config_save();
-        if (enable)
-        {
-            (void)gps_init(false);
-            gps_set_streaming(true);
-            usb_cli_console_set_gps_stream_mode(true);
-            printf("GPS passthrough enabled (persistent). Ctrl+C to exit.\n");
-        }
-        else
-        {
-            gps_set_streaming(false);
-            printf("GPS passthrough disabled.\n");
-        }
-        return 0;
-    }
-
-    if (opt_stream)
-    {
-        (void)gps_init(false);
-        gps_set_streaming(true);
-        usb_cli_console_set_gps_stream_mode(true);
-        printf("GPS stream mode. Ctrl+C or +++ Enter to exit.\n");
-        return 0;
-    }
-
-    if (!opt_print)
-    {
-        gps_print_usage();
-        return 1;
-    }
-
-    (void)gps_init(false);
-    gps_print_last_fix(opt_json);
-    return 0;
-}
-
-void gps_console_register(void)
-{
-    if (s_cmd_registered)
-    {
-        return;
-    }
-
-    const esp_console_cmd_t cmd = {
-        .command = "gps",
-        .help = "GPS: -p [-j] print fix, -s stream NMEA, -t [0|1] USB passthrough, -U [0|1] route NMEA to UART0, -c check UART, -P [0|1] power",
-        .hint = NULL,
-        .func = &cmd_gps,
-    };
-
-    (void)esp_console_cmd_register(&cmd);
-    s_cmd_registered = true;
-}

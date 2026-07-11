@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "cmdline_manager.h"
 #include "esp_console.h"
 #include "esp_err.h"
 #include "esp_ota_ops.h"
@@ -293,5 +294,5 @@ void usb_cli_ota_register(void)
         .func    = &usb_cli_cmd_ota,
     };
 
-    (void)esp_console_cmd_register(&cmd_ota);
+    (void)cmdline_manager_register(&cmd_ota);
 }

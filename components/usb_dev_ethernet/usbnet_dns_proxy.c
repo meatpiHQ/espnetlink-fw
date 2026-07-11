@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 
+#include "esp_attr.h"
 #include "esp_log.h"
 
 #include "freertos/FreeRTOS.h"
@@ -143,5 +144,11 @@ void usbnet_dns_proxy_start(void)
         return;
     }
 
-    xTaskCreatePinnedToCore(usbnet_dns_proxy_task, "usbnet_dns", 4096, NULL, 9, &s_dns_task, 0);
+    /* §2: static stack in PSRAM (UDP forwarder — no flash writes). */
+    static StaticTask_t s_dns_tcb;
+    static StackType_t s_dns_stack[4096] EXT_RAM_BSS_ATTR;
+
+    s_dns_task = xTaskCreateStaticPinnedToCore(usbnet_dns_proxy_task,
+                                               "usbnet_dns", 4096, NULL, 9,
+                                               s_dns_stack, &s_dns_tcb, 0);
 }

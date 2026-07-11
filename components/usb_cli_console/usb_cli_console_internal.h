@@ -36,6 +36,19 @@ void usb_cli_console_raw_rx_resume(void);
 /** Register the `ota` console command (usb_cli_ota.c). */
 void usb_cli_ota_register(void);
 
+/** Device-side input echo state (usb_cli_console_cli.c owns the `echo`
+ *  command; the console line editor reads this). */
+bool usb_cli_echo_is_enabled(void);
+
+/** Register this component's own commands (`echo`, `ota`) with
+ *  cmdline_manager — called from the settings boot apply when `cli` is
+ *  true (usb_cli_console_settings.c). */
+void usb_cli_console_register_cli(void);
+
+/** Register the "usb_cli_console" {cli} settings descriptor (§6b minimal
+ *  knob). Called by main between settings init and start. */
+esp_err_t usb_cli_console_register_settings(void);
+
 #ifdef __cplusplus
 }
 #endif

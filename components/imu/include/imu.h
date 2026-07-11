@@ -33,10 +33,16 @@ esp_err_t imu_configure_wom(uint8_t threshold);
 esp_err_t imu_prepare_wom_sleep(void);
 
 /**
- * @brief Register the "imu" CLI command with esp_console.
- *        Call after esp_console_init().
+ * @brief Register the "imu" CLI command (via cmdline_manager). Invoked by
+ *        the settings boot apply when the `cli` setting is true.
  */
 void imu_console_register(void);
+
+/**
+ * @brief Register the "imu" {cli} settings descriptor (§6b minimal knob).
+ *        Called by main between settings init and start.
+ */
+esp_err_t imu_register_settings(void);
 
 #ifdef __cplusplus
 }

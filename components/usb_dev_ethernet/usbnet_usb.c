@@ -14,6 +14,7 @@
 
 #include "lwip/tcpip.h"
 
+#include "esp_attr.h"
 #include "usbd_core.h"
 #include "usbd_cdc_acm.h"
 #include "usbd_rndis.h"
@@ -364,12 +365,24 @@ void usbnet_usb_start(void)
 {
     if (!s_rx_task)
     {
-        xTaskCreatePinnedToCore(usbnet_rx_task, "usbnet_rx", 4096, NULL, 10, &s_rx_task, 0);
+        /* §2: static stack in PSRAM (pbuf shuttling — no flash writes). */
+        static StaticTask_t s_rx_tcb;
+        static StackType_t s_rx_stack[4096] EXT_RAM_BSS_ATTR;
+
+        s_rx_task = xTaskCreateStaticPinnedToCore(usbnet_rx_task, "usbnet_rx",
+                                                  4096, NULL, 10, s_rx_stack,
+                                                  &s_rx_tcb, 0);
     }
 
     if (!s_evt_task)
     {
-        xTaskCreatePinnedToCore(usbnet_evt_task, "usbnet_evt", 3072, NULL, 11, &s_evt_task, 0);
+        /* §2: static stack in PSRAM. */
+        static StaticTask_t s_evt_tcb;
+        static StackType_t s_evt_stack[3072] EXT_RAM_BSS_ATTR;
+
+        s_evt_task = xTaskCreateStaticPinnedToCore(usbnet_evt_task, "usbnet_evt",
+                                                   3072, NULL, 11, s_evt_stack,
+                                                   &s_evt_tcb, 0);
     }
 
     if (!s_tx_done_sem)

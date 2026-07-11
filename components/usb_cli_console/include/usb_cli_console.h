@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "esp_err.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -20,6 +22,11 @@ void usb_cli_console_usb_on_configured(uint8_t busid);
 // GPS stream input mode: while enabled, console ignores normal command lines and
 // only watches for the escape sequence (+++++++ or ======= + Enter) to exit.
 void usb_cli_console_set_gps_stream_mode(bool enabled);
+
+// Register the "usb_cli_console" {cli} settings descriptor (standard §6b);
+// the boot apply registers this transport's own commands (echo, ota).
+// Called by main between settings_manager init and start.
+esp_err_t usb_cli_console_register_settings(void);
 
 #ifdef __cplusplus
 }

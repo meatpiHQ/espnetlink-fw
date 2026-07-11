@@ -1,0 +1,3 @@
+## gps: NMEA parsing via igrr/libnmea.
+dependencies:
+  igrr/libnmea: "^0.2.1"
