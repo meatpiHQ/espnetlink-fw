@@ -41,6 +41,7 @@
 #include "driver/uart.h"
 
 #include "modem_manager.h"
+#include "modem_manager_parse.h"
 #include "modem_manager_private.h"
 
 static const char *TAG = "modem_manager"; /* §10: TAG == component dir */
@@ -295,42 +296,7 @@ static bool at_query_prefix(const char *cmd, const char *prefix, char *out, size
     return at_expect_ok(1000);
 }
 
-/**
- * @brief Parse AT+IFC? response (flow control settings)
- * @param s Response string (e.g., "2,2")
- * @param rx Pointer to store RX flow control value
- * @param tx Pointer to store TX flow control value
- * @return true if parsed successfully, false otherwise
- * @note Flow control values: 0=none, 1=software, 2=hardware (RTS/CTS)
- */
-static bool parse_ifc(const char *s, int *rx, int *tx)
-{
-    // formats: "2,2"
-    int r = -1, t = -1;
-    if (sscanf(s, "%d,%d", &r, &t) == 2)
-    {
-        *rx = r; *tx = t;
-        return true;
-    }
-    return false;
-}
-
-/**
- * @brief Parse AT+IPR? response (baud rate setting)
- * @param s Response string (e.g., "115200" or "3000000")
- * @param baud Pointer to store parsed baud rate
- * @return true if parsed successfully, false otherwise
- */
-static bool parse_ipr(const char *s, int *baud)
-{
-    int b = -1;
-    if (sscanf(s, "%d", &b) == 1)
-    {
-        *baud = b;
-        return true;
-    }
-    return false;
-}
+/* parse_ifc / parse_ipr moved to modem_manager_parse.c (host-tested, §7). */
 
 /**
  * @brief Execute AT command and log all response lines
@@ -552,7 +518,7 @@ esp_err_t configure_flow_and_baud(void)
     int rx = -1, tx = -1;
     if (at_query_prefix("AT+IFC?", "+IFC", resp, sizeof(resp)))
     {
-        if (parse_ifc(resp, &rx, &tx))
+        if (mm_parse_ifc(resp, &rx, &tx))
         {
             ESP_LOGI(TAG, "Current IFC: %d,%d", rx, tx);
             ifc_known = true;
@@ -591,7 +557,7 @@ esp_err_t configure_flow_and_baud(void)
     int cur_baud = -1;
     if (at_query_prefix("AT+IPR?", "+IPR", resp, sizeof(resp)))
     {
-        if (parse_ipr(resp, &cur_baud))
+        if (mm_parse_ipr(resp, &cur_baud))
         {
             ESP_LOGI(TAG, "Current IPR: %d", cur_baud);
             ipr_known = true;

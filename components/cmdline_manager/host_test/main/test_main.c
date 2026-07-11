@@ -7,6 +7,8 @@
  */
 #include <string.h>
 
+#include <stdlib.h>
+
 #include "unity.h"
 
 #include "cmdline_manager_private.h"
@@ -122,5 +124,5 @@ void app_main(void)
     RUN_TEST(test_batch_of_lines_one_chunk);
     RUN_TEST(test_empty_lines_skipped);
     RUN_TEST(test_overflow_discarded_then_recovers);
-    UNITY_END();
+    exit(UNITY_END()); /* the CI verdict is this process's exit code */
 }

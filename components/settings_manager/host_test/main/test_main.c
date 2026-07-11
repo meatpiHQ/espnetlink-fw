@@ -3,6 +3,8 @@
  * @brief Host test entry point. Runs the schema + codec unit suites on the
  *        linux target (no hardware required).
  */
+#include <stdlib.h>
+
 #include "unity.h"
 
 /* schema */
@@ -143,5 +145,5 @@ void app_main(void)
     RUN_TEST(test_fields_settings_json_stringize);
     RUN_TEST(test_fields_array_rejects_malformed_tables);
 
-    UNITY_END();
+    exit(UNITY_END()); /* the CI verdict is this process's exit code */
 }

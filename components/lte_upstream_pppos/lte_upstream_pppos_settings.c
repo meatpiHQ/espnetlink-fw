@@ -9,7 +9,7 @@
  * sharing the LTE uplink over USB is the device's purpose); the bench
  * device carries an imported false while under test.
  */
-#include <string.h>
+#include <stdio.h>
 
 #include "esp_err.h"
 
@@ -50,7 +50,9 @@ static void copy_str(char *dst, size_t dst_len, const cJSON *obj,
     dst[0] = '\0';
     if (cJSON_IsString(item) && item->valuestring != NULL)
     {
-        strlcpy(dst, item->valuestring, dst_len);
+        /* snprintf, not strlcpy: this file also compiles in the host test
+         * and glibc < 2.38 (the IDF 5.5 CI container) lacks strlcpy. */
+        snprintf(dst, dst_len, "%s", item->valuestring);
     }
 }
 

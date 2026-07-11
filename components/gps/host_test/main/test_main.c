@@ -5,6 +5,8 @@
  *        storage stub — schema defaults, range validation, reboot-to-apply
  *        semantics, and the §6b `cli` registration gate.
  */
+#include <stdlib.h>
+
 #include "unity.h"
 
 #include "cJSON.h"
@@ -129,5 +131,5 @@ void app_main(void)
     RUN_TEST(test_persist_is_reboot_to_apply);
     RUN_TEST(test_cli_gate_off_after_reboot);
 
-    UNITY_END();
+    exit(UNITY_END()); /* the CI verdict is this process's exit code */
 }

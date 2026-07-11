@@ -68,9 +68,34 @@ Tracked against `MEATPI_COMPONENT_STANDARD.md` rev 1.0. Updated 2026-07-11
 
 | Item | Status | Notes |
 |---|---|---|
-| Host unit tests + CI | ✅* | `.github/workflows/host-tests.yml` builds + runs all 7 host_test suites (6 ported + new gps) on the IDF `linux` target (espressif/idf:v5.5.3 container) on every push/PR. *First green run pending a push (local smoke needs Docker Desktop started — daemon was down) |
-| pytest test_apps on main sdkconfig/partitions | ✅ | All 6 test_apps repointed: inherit repo-root sdkconfig.defaults (which now pins the espnetlink partition table + 16MB flash) + minimal test-only overlay |
-| Product-component test exemplar | ✅ | components/gps/host_test: gps settings descriptor against the REAL settings_manager registry + storage stub — schema defaults, range validation, reboot-to-apply semantics, §6b cli-gate (CLI register spies) |
+| Host unit tests + CI | ✅* | `.github/workflows/host-tests.yml` builds + runs all **12** host_test suites on the IDF `linux` target (espressif/idf:v5.5.3 container) on every push/PR. Suites `exit(UNITY_END())` so a failing test fails the job (plain `UNITY_END()` would exit 0). *First CI run pending a push |
+| pytest test_apps on main sdkconfig/partitions | ✅ | All 6 ported test_apps repointed: inherit repo-root sdkconfig.defaults (which now pins the espnetlink partition table + 16MB flash) + minimal test-only overlay |
+
+### Per-component coverage map
+
+"Anything that can be host-tested must be" — the pure logic in every
+component is either under host test or the component has none. Hardware-bound
+behavior is bench-verified today; on-target pytest apps are the backlog.
+
+| Component | host_test | What it covers / why not |
+|---|---|---|
+| settings_manager | ✅ | Registry, codec, schema, backup (ported with component) |
+| log_manager | ✅ | Level table / pipeline logic (ported) |
+| cmdline_manager | ✅ | Registry + dispatcher (ported) |
+| http_server_manager | ✅ | Host-testable core (ported) |
+| dev_status_manager | ✅ | dev_status_manager_fmt.c formatting (ported) |
+| wifi_manager | ✅ | wifi_manager_select.c AP/STA selection (ported) |
+| gps | ✅ | Settings descriptor: defaults, agnss_cache_s range, reboot-to-apply, §6b cli gate. NMEA/AGNSS engine is UART/NVS-bound → bench + backlog |
+| lte_upstream_pppos | ✅ | Settings descriptor: defaults (incl. **ncm_share=true product default**), apn maxLength, reboot-to-apply, cli gate. PPP/CMUX engine is modem-bound → bench + backlog |
+| modem_manager | ✅ | mm_parse_ifc/mm_parse_ipr AT-response parsers (extracted to modem_manager_parse.c). Power/probe ladder is UART-bound → bench + backlog |
+| api_http | ✅ | api_http_util.c: secret redact/unredact, /api/settings URI parse, level map. Handlers are esp_http_server-bound, verified on device over RNDIS |
+| imu | ✅ | {cli} descriptor gate. ICM-42670 driver is I2C-bound → backlog |
+| usb_cli_console | ✅ | {cli} descriptor gate. Console core/OTA path is USB-bound — exercised on every bench OTA/CLI session |
+| filesystem | — | LittleFS mount glue only, no pure logic → on-target test_app backlog |
+| hw_config | — | Header-only pin map; nothing executable |
+| usb_dev_ethernet | — | RNDIS/lwip/dhcps glue, USB-bound → bench-verified (DHCP lease, NAPT); HIL backlog |
+| usb_cdc_host_manager, usb_dev_bridge | — | Legacy alternate modes (not active in product boot); HIL backlog if revived |
+| main units (config CLI key map, legacy import) | — | Verified end-to-end on device (byte-parity sweeps + old→new upgrade simulation); host-testing main/* is future work |
 
 ## Known deviations (product addendum candidates)
 

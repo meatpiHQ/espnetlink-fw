@@ -23,6 +23,11 @@ jobs:
           - components/dev_status_manager/host_test
           - components/wifi_manager/host_test
           - components/gps/host_test
+          - components/lte_upstream_pppos/host_test
+          - components/imu/host_test
+          - components/usb_cli_console/host_test
+          - components/api_http/host_test
+          - components/modem_manager/host_test
     steps:
       - uses: actions/checkout@v4
       - name: Build and run ${{ matrix.suite }}

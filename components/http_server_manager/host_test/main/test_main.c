@@ -2,6 +2,8 @@
  * @file test_main.c
  * @brief Host test entry point for http_server_manager match logic.
  */
+#include <stdlib.h>
+
 #include "unity.h"
 
 void test_normalize_strips_query_and_fragment(void);
@@ -30,5 +32,5 @@ void app_main(void)
     RUN_TEST(test_resolve_second_table_reachable);
     RUN_TEST(test_resolve_no_match_is_null);
     RUN_TEST(test_mime_inference);
-    UNITY_END();
+    exit(UNITY_END()); /* the CI verdict is this process's exit code */
 }

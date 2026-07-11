@@ -2,6 +2,8 @@
  * @file test_main.c
  * @brief Host test entry point for the wifi_manager selection module.
  */
+#include <stdlib.h>
+
 #include "unity.h"
 
 void test_scan_prefers_primary(void);
@@ -48,5 +50,5 @@ void app_main(void)
     RUN_TEST(test_parse_ipv4_plain);
     RUN_TEST(test_netmask_valid);
     RUN_TEST(test_backoff_curve);
-    UNITY_END();
+    exit(UNITY_END()); /* the CI verdict is this process's exit code */
 }

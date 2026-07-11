@@ -2,6 +2,8 @@
  * @file test_main.c
  * @brief Host test entry point for the log_manager crash-ring core.
  */
+#include <stdlib.h>
+
 #include "unity.h"
 
 void test_garbage_header_is_invalid(void);
@@ -26,5 +28,5 @@ void app_main(void)
     RUN_TEST(test_header_tamper_detected);
     RUN_TEST(test_size_mismatch_invalid);
     RUN_TEST(test_tuning_guard_clobber_is_harmless);
-    UNITY_END();
+    exit(UNITY_END()); /* the CI verdict is this process's exit code */
 }
