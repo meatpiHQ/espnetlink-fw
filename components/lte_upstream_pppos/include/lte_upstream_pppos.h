@@ -118,6 +118,10 @@ void lte_upstream_pppos_mark_time_synced(void);
 // Register the `lte` console command. Called by usb_cli_console.
 void lte_upstream_pppos_console_register(void);
 
+/** Register `GET /api/lte` (web UI status page; §9.1 feature route).
+ *  Called by main in HTTP-bearing compositions. */
+esp_err_t lte_upstream_pppos_register_http(void);
+
 /* -----------------------------------------------------------------------
  * Settings (standard §4.1: descriptor "lte_upstream_pppos" in
  * lte_upstream_pppos_settings.c)

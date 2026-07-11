@@ -1,0 +1,3 @@
+## imu_manager has no managed dependencies (icm42670 is vendored —
+## see icm42670/PROVENANCE.md; the bus comes from the local i2c_bus).
+dependencies: {}

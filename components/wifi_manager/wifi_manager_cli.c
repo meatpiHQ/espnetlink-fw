@@ -82,7 +82,6 @@ static int wifi_status(void)
         cmdline_printf("WiFi Status: Access Point mode\n");
     }
 
-    cmdline_printf("OK\n");
     return 0;
 }
 
@@ -175,7 +174,6 @@ static int wifi_info(void)
         }
     }
 
-    cmdline_printf("OK\n");
     return 0;
 }
 
@@ -206,7 +204,6 @@ static int cmd_wifi(int argc, char **argv)
            UART console). */
         cmdline_printf("stopping WiFi radio (until reboot)...\n");
         wifi_manager_stop();
-        cmdline_printf("OK\n");
         return 0;
     }
 
@@ -240,7 +237,6 @@ static int cmd_wifi(int argc, char **argv)
     cmdline_printf("AP started: %s (%u stations)\n",
                    wifi_manager_is_ap_started() ? "yes" : "no",
                    (unsigned)wifi_manager_get_ap_station_count());
-    cmdline_printf("OK\n");
     return 0;
 }
 

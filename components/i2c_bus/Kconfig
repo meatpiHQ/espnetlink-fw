@@ -1,0 +1,19 @@
+menu "ESPNetLink i2c_bus"
+
+config WICAN_I2C_SDA_GPIO
+    int "I2C SDA GPIO"
+    default 48
+    help
+        SDA pin of the shared peripheral I2C bus (ESPNetLink ESP32-S3:
+        GPIO48 — the ICM-42670 IMU pins from hw_config.h; WiCAN Pro
+        uses GPIO5). Per-hardware-revision; override in the board's
+        sdkconfig.
+
+config WICAN_I2C_SCL_GPIO
+    int "I2C SCL GPIO"
+    default 47
+    help
+        SCL pin of the shared peripheral I2C bus (ESPNetLink ESP32-S3:
+        GPIO47; WiCAN Pro uses GPIO6).
+
+endmenu

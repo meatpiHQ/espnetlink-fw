@@ -15,7 +15,9 @@
 #include "hw_config.h"
 #include "filesystem.h"
 #include "gps.h"
-#include "imu.h"
+#include "i2c_bus.h"
+#include "imu_manager.h"
+#include "vpn_manager.h"
 #include "usb_cli_console.h"
 
 #include "main_compose.h"
@@ -34,8 +36,14 @@
 #include "cmdline_manager.h"
 #include "dev_status_manager.h"
 #include "http_server_manager.h"
+#include "ha_webhooks.h"
+#include "http_client_manager.h"
 #include "log_manager.h"
+#include "mdns_manager.h"
+#include "ota_manager.h"
+#include "restart_tracker.h"
 #include "settings_manager.h"
+#include "web_ui.h"
 #include "wifi_manager.h"
 
 // Select exactly one mode (set one to 1, the other to 0)
@@ -290,6 +298,9 @@ void app_main(void)
     /* Log pipeline first (§9.6): everything below needs somewhere to log.
      * dev_status early: the device id feeds the AP SSID suffix. */
     init_step("log_manager_init", log_manager_init);
+    /* right after the log pipeline: the boot record must be written before
+     * anything below can crash (restart_tracker.h lifecycle note) */
+    init_step("restart_tracker_init", restart_tracker_init);
     init_step("dev_status_manager_init", dev_status_manager_init);
 
     esp_err_t ret = nvs_flash_init();
@@ -376,6 +387,8 @@ void app_main(void)
     /* ---- MeatPi core platform (standard §3/§4/§9) ------------------------- */
     init_step("settings_manager_init", settings_manager_init);
     init_step("log_manager_register_settings", log_manager_register_settings);
+    init_step("restart_tracker_register_settings",
+              restart_tracker_register_settings);
     init_step("dev_status_manager_register_settings",
               dev_status_manager_register_settings);
 
@@ -391,20 +404,36 @@ void app_main(void)
     init_step("http_server_manager_init", http_server_manager_init);
     init_step("wifi_manager_init", wifi_manager_init);
     init_step("cmdline_manager_init", cmdline_manager_init);
+    init_step("ota_manager_init", ota_manager_init);
     init_step("api_http_init", api_http_init);
+    init_step("http_client_manager_init", http_client_manager_init);
+    init_step("ha_webhooks_init", ha_webhooks_init);
+    init_step("mdns_manager_init", mdns_manager_init);
+    /* the shared I2C bus, then its peripheral manager (both register
+     * their settings/log descriptors inside init) */
+    init_step("i2c_bus_init", i2c_bus_init);
+    init_step("imu_manager_init", imu_manager_init);
+    init_step("vpn_manager_init", vpn_manager_init);
     /* product components register their settings descriptors (§4.1);
      * their console commands register from the settings boot apply,
      * gated by each component's `cli` setting (§6b) */
     init_step("lte_upstream_pppos_register_settings",
               lte_upstream_pppos_register_settings);
     init_step("gps_register_settings", gps_register_settings);
-    init_step("imu_register_settings", imu_register_settings);
     init_step("usb_cli_console_register_settings",
               usb_cli_console_register_settings);
     init_step("main_register_settings", main_register_settings);
     /* composite CLI commands owned by main (§6b): `config` */
     init_step("main_cli_register", main_cli_register);
     init_step("wifi_manager_register_http", wifi_manager_register_http);
+    init_step("ha_webhooks_register_http", ha_webhooks_register_http);
+    init_step("lte_register_http", lte_upstream_pppos_register_http);
+    init_step("gps_register_http", gps_register_http);
+    init_step("imu_manager_register_http", imu_manager_register_http);
+    init_step("vpn_manager_register_http", vpn_manager_register_http);
+    /* asset tables are pre-start only (§9.3): register the UI before
+     * http_server_manager_start */
+    init_step("web_ui_register", web_ui_register);
     (void)http_server_manager_set_request_gate(
         wifi_manager_http_request_allowed);
 
@@ -412,14 +441,8 @@ void app_main(void)
 
     /* config_manager retired: persistence lives in settings_manager (§4);
      * gps_init moved below the settings apply pass (its config now comes
-     * from the "gps" descriptor). */
-
-    // Initialize IMU (ICM42670) over I2C
-    esp_err_t imu_err = imu_init();
-    if (imu_err != ESP_OK)
-    {
-        ESP_LOGE(TAG, "IMU init failed: %s", esp_err_to_name(imu_err));
-    }
+     * from the "gps" descriptor). The legacy imu component is retired:
+     * imu_manager (WiCAN port) owns the ICM-42670 via i2c_bus. */
 
     #if ((USB_HOST_MODE + USB_DEV_MODE + USB_DEV_ETHERNET_MODE) != 1)
     #error "Select exactly one of USB_HOST_MODE, USB_DEV_MODE, USB_DEV_ETHERNET_MODE"
@@ -525,8 +548,16 @@ void app_main(void)
         ESP_LOGE(TAG, "GPS init failed: %s", esp_err_to_name(gps_err));
     }
 
+    start_component("restart_tracker", restart_tracker_start);
+    start_component("ota_manager", ota_manager_start);
+    start_component("i2c_bus", i2c_bus_start);
+    start_component("imu_manager", imu_manager_start);
     start_component("wifi_manager", wifi_manager_start);
     start_component("http_server_manager", http_server_manager_start);
+    start_component("http_client_manager", http_client_manager_start);
+    start_component("mdns_manager", mdns_manager_start);
+    start_component("vpn_manager", vpn_manager_start);
+    start_component("ha_webhooks", ha_webhooks_start);
     start_component("cmdline_manager", cmdline_manager_start);
 
     usb_dev_ethernet_set_console_enabled(true);

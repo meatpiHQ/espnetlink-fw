@@ -1,0 +1,3 @@
+## vpn_manager has no managed dependencies — esp_wireguard,
+## wireguard_lwip and microlink are local vendored components.
+dependencies: {}

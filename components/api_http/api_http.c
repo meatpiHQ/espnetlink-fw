@@ -4,8 +4,7 @@
  *        (the /api/settings surface — MeatPi standard §6).
  *
  * Port of WiCAN's api_http settings surface. Deviations for ESPNetLink:
- * no restart_tracker yet (delayed reboot = esp_restart()), backup marker
- * key is "espnetlink_backup".
+ * backup marker key is "espnetlink_backup".
  */
 #include <stdlib.h>
 #include <string.h>
@@ -16,6 +15,8 @@
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+
+#include "restart_tracker.h"
 
 #include "dev_status_manager.h" /* backup metadata: device id */
 #include "http_server_manager.h"
@@ -99,15 +100,19 @@ char *api_read_body(httpd_req_t *req, size_t max_len)
 /* ---- delayed reboot (response must flush first) ------------------------------- */
 
 static bool s_reboot_scheduled;
+static restart_tracker_planned_reason_t s_reboot_reason;
+static restart_tracker_source_t s_reboot_source;
+static uint32_t s_reboot_flags;
 
 static void reboot_task(void *arg)
 {
     (void)arg;
     vTaskDelay(pdMS_TO_TICKS(1000)); /* ~1 s: let the response flush */
-    esp_restart();
+    restart_tracker_restart(s_reboot_reason, s_reboot_source, s_reboot_flags);
 }
 
-void api_schedule_reboot(void)
+void api_schedule_reboot(restart_tracker_planned_reason_t reason,
+                         restart_tracker_source_t source, uint32_t flags)
 {
     if (s_reboot_scheduled)
     {
@@ -115,12 +120,15 @@ void api_schedule_reboot(void)
     }
 
     s_reboot_scheduled = true;
+    s_reboot_reason = reason;
+    s_reboot_source = source;
+    s_reboot_flags = flags;
 
-    /* internal-RAM stack (default heap): the task ends in esp_restart() */
+    /* internal-RAM stack (default heap): the task never returns */
     if (xTaskCreate(reboot_task, "api_reboot", 3072, NULL, 5, NULL) != pdPASS)
     {
         ESP_LOGE(TAG, "reboot task alloc failed; rebooting inline");
-        esp_restart();
+        restart_tracker_restart(reason, source, flags);
     }
 }
 
@@ -294,7 +302,8 @@ static esp_err_t settings_submit_handler(httpd_req_t *req)
     if (reboot)
     {
         /* no-op submits never reboot (§4.2); changed batches always do */
-        api_schedule_reboot();
+        api_schedule_reboot(RESTART_TRACKER_PLANNED_REASON_CONFIG_APPLY,
+                            RESTART_TRACKER_SOURCE_CONFIG_SERVER, 0);
     }
 
     return err;
@@ -450,7 +459,8 @@ static esp_err_t settings_backup_post_handler(httpd_req_t *req)
 
     if (any_changed)
     {
-        api_schedule_reboot();
+        api_schedule_reboot(RESTART_TRACKER_PLANNED_REASON_CONFIG_APPLY,
+                            RESTART_TRACKER_SOURCE_CONFIG_SERVER, 0);
     }
 
     return err;
@@ -493,7 +503,8 @@ static esp_err_t settings_factory_reset_handler(httpd_req_t *req)
 
     esp_err_t err = api_send_json(req, resp);
 
-    api_schedule_reboot();
+    api_schedule_reboot(RESTART_TRACKER_PLANNED_REASON_FACTORY_RESET,
+                        RESTART_TRACKER_SOURCE_WEB_UI, 0);
     return err;
 }
 
@@ -538,6 +549,21 @@ esp_err_t api_http_init(void)
     log_manager_register(&LOG_DESC);
 
     esp_err_t err = api_http_register_settings();
+
+    if (err == ESP_OK)
+    {
+        err = api_http_register_system();
+    }
+
+    if (err == ESP_OK)
+    {
+        err = api_http_register_diag();
+    }
+
+    if (err == ESP_OK)
+    {
+        err = api_http_register_ota();
+    }
 
     if (err != ESP_OK)
     {

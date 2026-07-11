@@ -30,7 +30,6 @@ static int cmd_version(int argc, char **argv)
                    dev_status_manager_partition_label());
     cmdline_printf("build:     %s %s\n", app->date, app->time);
     cmdline_printf("idf:       %s\n", esp_get_idf_version());
-    cmdline_printf("OK\n"); /* legacy version trailer */
     return 0;
 }
 

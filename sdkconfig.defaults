@@ -1,3 +1,6 @@
+# Product chip (test_apps inherit this; the product sdkconfig pins it too)
+CONFIG_IDF_TARGET="esp32s3"
+
 # This file was generated using idf.py save-defconfig. It can be edited manually.
 # Espressif IoT Development Framework (ESP-IDF) Project Minimal Configuration
 #
@@ -43,3 +46,12 @@ CONFIG_LWIP_TCP_WND_DEFAULT=32768
 CONFIG_LWIP_TCP_RECVMBOX_SIZE=16
 # NAT + IP-forwarding path pushes the tcpip task stack; give it room
 CONFIG_LWIP_TCPIP_TASK_STACK_SIZE=4096
+
+# vpn_manager (Tailscale Noise handshake): ChaCha20-Poly1305 in mbedtls
+CONFIG_MBEDTLS_CHACHA20_C=y
+CONFIG_MBEDTLS_POLY1305_C=y
+CONFIG_MBEDTLS_CHACHAPOLY_C=y
+
+# dev_status task monitor (/api/status/tasks, system -t)
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y

@@ -7,7 +7,7 @@ Run (QEMU or hardware):
 import pytest
 
 
-@pytest.mark.esp32
+@pytest.mark.esp32s3
 def test_settings_lifecycle(dut):
     # Registration hardening: bad schema / name / defaults rejected at call site.
     dut.expect_exact("REG badschema REJECTED")

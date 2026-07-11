@@ -28,9 +28,10 @@
 #include "freertos/task.h"
 
 #include "cmdline_manager.h"
+#include "restart_tracker.h"
 
 #include "gps.h"
-#include "imu.h"
+#include "imu_manager.h"
 #include "lte_upstream_pppos.h"
 #include "usb_cli_console.h"
 
@@ -168,7 +169,8 @@ static int cmd_reboot(int argc, char **argv)
     (void)lte_upstream_pppos_stop();
     printf("\n\n\n");
     vTaskDelay(pdMS_TO_TICKS(1000));  // allow message to flush before reboot
-    esp_restart();
+    restart_tracker_restart(RESTART_TRACKER_PLANNED_REASON_USER_REQUEST,
+                            RESTART_TRACKER_SOURCE_CONSOLE, 0);
     return 0;
 }
 
@@ -290,13 +292,10 @@ static esp_err_t prepare_mode_specific_wakeup(void)
     {
         esp_rom_printf(">>> configuring WOM (%u mg)\n", (unsigned)s_deep_sleep_wom_threshold);
 
-        esp_err_t err = imu_configure_wom(s_deep_sleep_wom_threshold);
-        if (err != ESP_OK)
-        {
-            return err;
-        }
-
-        err = imu_prepare_wom_sleep();
+        /* imu_manager (WiCAN port): one call stops the detector, arms WoM
+         * on INT1 and drains latched statuses (was configure+prepare). */
+        esp_err_t err =
+            imu_manager_prepare_wom_wake(s_deep_sleep_wom_threshold);
         if (err != ESP_OK)
         {
             return err;
@@ -476,7 +475,8 @@ static int cmd_wake(int argc, char **argv)
 
     printf("Waking up — rebooting to re-initialize peripherals...\n");
     vTaskDelay(pdMS_TO_TICKS(500));
-    esp_restart();
+    restart_tracker_restart(RESTART_TRACKER_PLANNED_REASON_POWER_WAKE,
+                            RESTART_TRACKER_SOURCE_CONSOLE, 0);
     return 0;
 }
 

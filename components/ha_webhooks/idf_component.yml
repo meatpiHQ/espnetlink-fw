@@ -1,0 +1,4 @@
+## cJSON comes from the IDF v5.5 bundled `json` component.
+dependencies:
+  idf:
+    version: ">=5.0"

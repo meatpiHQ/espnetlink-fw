@@ -6,7 +6,7 @@ Run (QEMU or hardware):
 import pytest
 
 
-@pytest.mark.esp32
+@pytest.mark.esp32s3
 def test_http_server_manager(dut):
     # Specific API route wins over the catch-all.
     dut.expect("PING status=200")

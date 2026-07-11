@@ -24,10 +24,15 @@ jobs:
           - components/wifi_manager/host_test
           - components/gps/host_test
           - components/lte_upstream_pppos/host_test
-          - components/imu/host_test
           - components/usb_cli_console/host_test
           - components/api_http/host_test
           - components/modem_manager/host_test
+          - components/restart_tracker/host_test
+          - components/ota_manager/host_test
+          - components/mdns_manager/host_test
+          - components/http_client_manager/host_test
+          - components/imu_manager/host_test
+          - components/vpn_manager/host_test
     steps:
       - uses: actions/checkout@v4
       - name: Build and run ${{ matrix.suite }}

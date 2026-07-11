@@ -1,0 +1,31 @@
+menu "ESPNetLink mdns_manager"
+
+config WICAN_HW_VERSION
+    string "Hardware version string"
+    default "ESPNetLink"
+    help
+        Advertised in the mDNS TXT record `hardware` (and available to
+        other surfaces). This is the ESPNetLink firmware; the WICAN_
+        symbol name is kept because cross-component consumers (api_http,
+        ha_webhooks, dev_status_manager) share it across MeatPi
+        products. Per-hardware-revision; override in the board's
+        sdkconfig.
+
+config WICAN_DEVICE_TYPE
+    string "Device type slug"
+    default "espnetlink"
+    help
+        The MeatPi HA-integration profile slug (device-contract v2):
+        lowercase, stable per product ("wican_pro", "wican_usb",
+        "wican", "espnetlink", ...). Advertised in the mDNS TXT record
+        `device_type` and returned by GET /api/info. This is the
+        ESPNetLink firmware; override in the board's sdkconfig.
+
+config WICAN_MODEL_NAME
+    string "Product model name"
+    default "ESPNetLink"
+    help
+        Human-readable model (the ESPNetLink product name). Returned by
+        GET /api/info; shown in the HA device registry.
+
+endmenu

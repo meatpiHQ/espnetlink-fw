@@ -1,0 +1,3 @@
+## http_client_manager has no managed dependencies (esp_http_client and
+## mbedtls are IDF components, declared in CMakeLists).
+dependencies: {}

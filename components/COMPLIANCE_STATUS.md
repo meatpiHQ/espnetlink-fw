@@ -13,7 +13,16 @@ Tracked against `MEATPI_COMPONENT_STANDARD.md` rev 1.0. Updated 2026-07-11
 | http_server_manager | ✅ | Ported; :80 live. IDF 5.5 note: WS pre-handshake gate is v6-only (frames still gated) |
 | /api/settings HTTP API (§6) | ✅ | `api_http` port (settings surface). GET/PUT/schema/list/submit/backup/factory_reset verified on device over RNDIS |
 | wifi_manager + dev_status_manager | ✅ | AP `ESPNetLink_<tail>` @192.168.80.1 verified; STA/fallbacks available via settings. dev_status events glue = no-op (no event_manager here) |
-| HTTP route docs (components/HTTP_API.md central map) | ✗ | Ported components carry their per-component HTTP_API.md; central map not written yet |
+| restart_tracker (PSRAM-noinit reboot forensics; the ONE sanctioned reboot) | ✅ | Ported 2026-07-12; every reboot path routed through it (settings submit, factory reset, OTA apply, CLI reboot/wake, /api/restart). Device-verified: unplanned→user_request→config_apply→ota_apply records across real reboots |
+| api_http system/diag/ota areas (/api/status, /api/status/tasks, /api/info, /api/restart*, /api/logs/*, /api/ota/*) | ✅ | Verbatim WiCAN ports; all device-verified over RNDIS. /api/info = HA identity route (device_type espnetlink) |
+| ota_manager + multipart_upload (HTTP firmware update) | ✅ | POST /api/ota/upload (raw + multipart) + legacy /upload/ota.bin alias; end-to-end verified: curl upload → ota partition flip → tracked ota_apply reboot |
+| mdns_manager (`_meatpi._tcp`, TXT mac/device_id/device_type=espnetlink, hostname espnetlink_<id>) | ✅ | Advertising verified in device log. Caveat: esp-mdns binds the WiFi netifs only — the raw-lwip RNDIS link carries no mDNS (HA discovers over WiFi; RNDIS/manual-IP always works) |
+| ha_webhooks (HA telemetry: /api/webhook + poster) | ✅ | ESPNetLink payload: status{identity, LTE fields, wifi_mode, vpn_*} + gps{} (never diffed). Bench-verified against a local fake HA: 201 registration, 5 s pushes, diff mode with identity overlay, gzip (415B vs 915B), 204 handling |
+| http_client_manager | ✅ | Ported; cert_manager sets unsupported (bundle-only TLS), download-to-file = ESP_ERR_NOT_SUPPORTED (no consumer) |
+| web_ui (browser settings/status/system UI at `/`) | ✅ | WiCAN v6 layout, ESPNetLink branding; nav pruned to Status/Settings/System/About; status page reads /api/lte + /api/gps + /api/vpn + /api/imu; gzip asset serving verified |
+| vpn_manager (WireGuard + Tailscale) + vendored esp_wireguard/wireguard_lwip/microlink | ✅ | Ported with 4 documented mbedtls-3.6 fixes in microlink (PROVENANCE.md); /api/vpn + keygen + settings schema live on device; tunnels not yet bench-tested against real endpoints |
+| imu_manager + i2c_bus (replaces the legacy imu component) | ✅ | SMD/WoM detectors, /api/imu (bench: gravity on Z, die temp), motion dev-status bit, `imu` CLI; ESPNetLink extension imu_manager_wom.c keeps `sleep 4` wake-on-motion working |
+| HTTP route docs (components/HTTP_API.md central map) | ✅ | Central map current (settings/system/diag/ota/webhook/wifi/lte/gps/vpn/imu + UI) |
 
 ## §2 Memory
 
@@ -68,8 +77,8 @@ Tracked against `MEATPI_COMPONENT_STANDARD.md` rev 1.0. Updated 2026-07-11
 
 | Item | Status | Notes |
 |---|---|---|
-| Host unit tests + CI | ✅* | `.github/workflows/host-tests.yml` builds + runs all **12** host_test suites on the IDF `linux` target (espressif/idf:v5.5.3 container) on every push/PR. Suites `exit(UNITY_END())` so a failing test fails the job (plain `UNITY_END()` would exit 0). *First CI run pending a push |
-| pytest test_apps on main sdkconfig/partitions | ✅ | All 6 ported test_apps repointed: inherit repo-root sdkconfig.defaults (which now pins the espnetlink partition table + 16MB flash) + minimal test-only overlay |
+| Host unit tests + CI | ✅* | `.github/workflows/host-tests.yml` builds + runs all **17** host_test suites on the IDF `linux` target (espressif/idf:v5.5.3 container) on every push/PR — all 17 verified PASSING locally in the same image (2026-07-12). Suites `exit(UNITY_END())` so a failing test fails the job. *First CI run pending a push |
+| pytest test_apps on main sdkconfig/partitions | ✅ | 8 test_apps: 5 ported cores + restart_tracker (came with the port) + NEW filesystem + usb_dev_ethernet smokes (2026-07-12). All inherit repo-root sdkconfig.defaults + minimal overlay |
 
 ### Per-component coverage map
 
@@ -89,13 +98,42 @@ behavior is bench-verified today; on-target pytest apps are the backlog.
 | lte_upstream_pppos | ✅ | Settings descriptor: defaults (incl. **ncm_share=true product default**), apn maxLength, reboot-to-apply, cli gate. PPP/CMUX engine is modem-bound → bench + backlog |
 | modem_manager | ✅ | mm_parse_ifc/mm_parse_ipr AT-response parsers (extracted to modem_manager_parse.c). Power/probe ladder is UART-bound → bench + backlog |
 | api_http | ✅ | api_http_util.c: secret redact/unredact, /api/settings URI parse, level map. Handlers are esp_http_server-bound, verified on device over RNDIS |
-| imu | ✅ | {cli} descriptor gate. ICM-42670 driver is I2C-bound → backlog |
+| imu_manager (replaces imu) | ✅ | WiCAN suite: policy state machine + settings migration (host) + on-device /api/imu + `imu` CLI bench-verified. WoM deep-sleep extension is hardware-bound |
+| i2c_bus | — | Thin bus owner (one init + add_device wrapper); exercised by imu_manager on every boot |
+| restart_tracker | ✅ | WiCAN suite: pure core (CRC envelope, ring, planned intent, MSPI-guard) — 8 host tests + test_app |
+| ota_manager | ✅ | WiCAN suite: pure session state machine (flash ops injected). HTTP path device-verified end-to-end |
+| mdns_manager | ✅ | WiCAN suite (hostname builders adapted to espnetlink_<id>) |
+| http_client_manager | ✅ | WiCAN suite: pure auth/url/base64 helpers |
+| vpn_manager | ✅ | WiCAN suite (pure config/state logic). Tunnels not yet exercised against live endpoints |
+| ha_webhooks / multipart_upload / web_ui | — | Transport/UI glue; bench-verified live (fake-HA pushes incl. gzip + diff mode; multipart + raw OTA uploads; UI serving). esp_wireguard/wireguard_lwip/microlink are vendored engines (upstream provenance documented) |
 | usb_cli_console | ✅ | {cli} descriptor gate. Console core/OTA path is USB-bound — exercised on every bench OTA/CLI session |
-| filesystem | — | LittleFS mount glue only, no pure logic → on-target test_app backlog |
+| filesystem | ✅* | NEW test_apps smoke (mount + POSIX roundtrip + delete on the real storage partition) — *on-target run pending bench pass |
 | hw_config | — | Header-only pin map; nothing executable |
-| usb_dev_ethernet | — | RNDIS/lwip/dhcps glue, USB-bound → bench-verified (DHCP lease, NAPT); HIL backlog |
+| usb_dev_ethernet | — | NEW test_apps smoke (stack up + 5 s stability); full RNDIS behavior is host-side — bench-verified daily (DHCP lease, NAPT, OTA-over-RNDIS) |
 | usb_cdc_host_manager, usb_dev_bridge | — | Legacy alternate modes (not active in product boot); HIL backlog if revived |
 | main units (config CLI key map, legacy import) | — | Verified end-to-end on device (byte-parity sweeps + old→new upgrade simulation); host-testing main/* is future work |
+
+## Port deviations (2026-07-12 WiCAN feature-set port)
+
+- `ha_webhooks` payload: `autopid_data`/`config` sections replaced by `gps`
+  (never diffed — the HA tracker needs lat+lon together); `status` carries
+  `lte_*` fields; poster gates on LTE-PPP-or-WiFi (the LTE uplink has no
+  dev-status bit).
+- `vpn_manager`: rtc_manager absent → clock validity = `time(NULL)` sanity
+  floor (LTE NITZ feeds settimeofday); event_manager glue no-op'd.
+- `microlink` (Tailscale engine): 4 mbedtls-3.6 compat fixes, documented in
+  its PROVENANCE.md (public chacha headers, PSA RNG conf, cJSON via bundled
+  json, tf-psa include hack removed).
+- `http_client_manager`: cert_manager sets unsupported (esp-tls bundle
+  only); `download()` = ESP_ERR_NOT_SUPPORTED.
+- `imu_manager`: event_manager glue excluded; ESPNetLink gained
+  `imu_manager_wom.c` (`sleep 4` wake-on-motion arm — kept from legacy imu).
+- Ported `*_cli.c` internal `OK` trailers stripped — on this product the
+  CDC console owns the OK/ERROR trailer (legacy parity contract).
+- mDNS: `_meatpi._tcp` only (no `_wican._tcp`); esp-mdns rides the WiFi
+  netifs — the raw-lwip RNDIS link carries no mDNS by design.
+- Identity Kconfig (`CONFIG_WICAN_DEVICE_TYPE`= espnetlink etc.) keeps the
+  WICAN_* symbol names for cross-component source compatibility.
 
 ## Known deviations (product addendum candidates)
 

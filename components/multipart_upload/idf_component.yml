@@ -1,0 +1,3 @@
+## multipart_upload has no managed dependencies (esp_http_server is an
+## IDF component, declared in CMakeLists; the multipart parser is vendored).
+dependencies: {}

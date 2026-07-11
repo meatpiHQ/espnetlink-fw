@@ -12,6 +12,7 @@
 #include "esp_err.h"
 
 #include "cJSON.h"
+#include "restart_tracker.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -56,13 +57,18 @@ esp_err_t api_send_error(struct httpd_req *req, const char *status,
  *  NULL when missing/too large/receive error. */
 char *api_read_body(struct httpd_req *req, size_t max_len);
 
-/** Schedule esp_restart() after ~1 s so the HTTP response flushes first.
- *  Idempotent per boot (first wins). */
-void api_schedule_reboot(void);
+/** Schedule a tracked reboot after ~1 s so the HTTP response flushes first
+ *  (restart_tracker_restart — never raw esp_restart). Idempotent per boot
+ *  (first wins). */
+void api_schedule_reboot(restart_tracker_planned_reason_t reason,
+                         restart_tracker_source_t source, uint32_t flags);
 
 /* ---- per-area registration (called by api_http_init) ----------------------- */
 
 esp_err_t api_http_register_settings(void);
+esp_err_t api_http_register_system(void);
+esp_err_t api_http_register_diag(void);
+esp_err_t api_http_register_ota(void);
 
 /** Batch-changed flag shared between the settings PUT and submit handlers. */
 void api_settings_note_changed(void);

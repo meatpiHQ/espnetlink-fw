@@ -77,6 +77,10 @@ esp_err_t gps_uart_write(const void *data, size_t len);
 // This is called by usb_cli_console so new components can add commands.
 void gps_console_register(void);
 
+/** Register `GET /api/gps` (web UI status page; §9.1 feature route).
+ *  Called by main in HTTP-bearing compositions. */
+esp_err_t gps_register_http(void);
+
 /* -----------------------------------------------------------------------
  * AGNSS assistance (EASY prediction + time/position injection)
  * ----------------------------------------------------------------------- */
