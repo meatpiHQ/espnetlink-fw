@@ -19,6 +19,7 @@ idf_component_register(
          "${sm_dir}/settings_manager_fields.c"
     INCLUDE_DIRS "stubs" "${lte_dir}/include"
                  "${sm_dir}/include" "${sm_dir}" "${sm_dir}/host_test/main"
-    # cJSON from the IDF v5.5 bundled `json` component.
-    REQUIRES unity json
+    # cJSON comes from the espressif/cjson managed dep (idf_component.yml);
+    # IDF v6 dropped the bundled `json` component.
+    REQUIRES unity
 )

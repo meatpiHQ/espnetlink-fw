@@ -10,6 +10,7 @@ idf_component_register(
     # restart_tracker/include: api_http_private.h pulls restart_tracker.h
     # (pure types header, host-safe)
     INCLUDE_DIRS "${api_dir}" "${rt_dir}/include"
-    # cJSON from the IDF v5.5 bundled `json` component; log for esp_log.h.
-    REQUIRES unity json log
+    # cJSON comes from the espressif/cjson managed dep (idf_component.yml);
+    # IDF v6 dropped the bundled `json` component. log for esp_log.h.
+    REQUIRES unity log
 )

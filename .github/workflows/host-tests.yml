@@ -11,7 +11,7 @@ on:
 jobs:
   host-tests:
     runs-on: ubuntu-latest
-    container: espressif/idf:v5.5.3
+    container: espressif/idf:v6.0.2
     strategy:
       fail-fast: false
       matrix:
