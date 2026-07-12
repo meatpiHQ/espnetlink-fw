@@ -231,7 +231,8 @@ static esp_err_t pair_send_and_wait_ack(int cmd_id, const char *cmd_str,
     ESP_LOGI(TAG, "PAIR%d sent, waiting for ACK...", cmd_id);
 
     char ack_prefix[32];
-    snprintf(ack_prefix, sizeof(ack_prefix), "$PAIR001,%d,", cmd_id);
+    /* the module zero-pads the command id in ACKs ($PAIR001,003,0) */
+    snprintf(ack_prefix, sizeof(ack_prefix), "$PAIR001,%03d,", cmd_id);
     size_t prefix_len = strlen(ack_prefix);
 
     int64_t deadline = esp_timer_get_time() / 1000 + timeout_ms;
@@ -259,12 +260,16 @@ static esp_err_t pair_send_and_wait_ack(int cmd_id, const char *cmd_str,
                 agnss_pair_lock_give();
                 return ESP_OK;
             }
-            else
+            if (result == 1)
             {
-                ESP_LOGW(TAG, "PAIR%d ACK error: %d", cmd_id, result);
-                agnss_pair_lock_give();
-                return ESP_FAIL;
+                /* protocol spec §2.4.1: 1 = "command is being processed,
+                 * wait for the result" — the final $PAIR001,<id>,0 follows
+                 * (PAIR003/511/002 all ACK this way) */
+                continue;
             }
+            ESP_LOGW(TAG, "PAIR%d ACK error: %d", cmd_id, result);
+            agnss_pair_lock_give();
+            return ESP_FAIL;
         }
     }
 
@@ -544,33 +549,33 @@ esp_err_t agnss_save_easy_data(void)
 {
     ESP_LOGI(TAG, "Saving EASY navigation data...");
 
-    /* For simplicity, handle >1 Hz case: set 1 Hz, restart, save, hot-start */
-    /* We'll always do the safe path: set 1 Hz → ack → save → ack */
-
-    /* Set fix rate to 1 Hz: $PAIR382,1000 */
+    /* Safe save path: 1 Hz fix rate → GNSS subsystem off → PAIR511 save
+     * → GNSS subsystem back on. (Historic bug: this sent $PAIR382 —
+     * TEST_LOCK_SYSTEM_SLEEP — believing it was the fix-rate command;
+     * fix rate is $PAIR050, protocol spec §2.4.9.) */
     char cmd[48];
-    agnss_build_pair_cmd(cmd, sizeof(cmd), "PAIR382,1000");
-    esp_err_t err = pair_send_and_wait_ack(382, cmd, 2000);
+    agnss_build_pair_cmd(cmd, sizeof(cmd), "PAIR050,1000");
+    esp_err_t err = pair_send_and_wait_ack(50, cmd, 2000);
     if (err != ESP_OK)
     {
-        ESP_LOGW(TAG, "PAIR382 (set 1Hz) failed, trying save anyway");
+        ESP_LOGW(TAG, "PAIR050 (set 1Hz) failed, trying save anyway");
     }
 
-    /* Cold start to apply fix rate change: $PAIR003 */
+    /* GNSS subsystem off while writing NVRAM: $PAIR003 (POWER_OFF) */
     agnss_build_pair_cmd(cmd, sizeof(cmd), "PAIR003");
     err = pair_send_and_wait_ack(3, cmd, 2000);
     if (err != ESP_OK)
     {
-        ESP_LOGW(TAG, "PAIR003 (cold start) failed, trying save anyway");
+        ESP_LOGW(TAG, "PAIR003 (GNSS off) failed, trying save anyway");
     }
 
     vTaskDelay(pdMS_TO_TICKS(500));
 
-    /* Save EASY data: $PAIR511 */
+    /* Save navigation data to module NVRAM: $PAIR511 */
     agnss_build_pair_cmd(cmd, sizeof(cmd), "PAIR511");
     err = pair_send_and_wait_ack(511, cmd, 5000);
 
-    /* Hot start to resume: $PAIR002 */
+    /* GNSS subsystem back on: $PAIR002 (POWER_ON) */
     char hcmd[32];
     agnss_build_pair_cmd(hcmd, sizeof(hcmd), "PAIR002");
     pair_send_and_wait_ack(2, hcmd, 2000);
