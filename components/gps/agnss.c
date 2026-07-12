@@ -541,6 +541,96 @@ static esp_err_t verify_epoc_status(void)
     return ESP_ERR_TIMEOUT;
 }
 
+/* Fix-quality config (LC76G_CAPABILITIES.md): static-navigation threshold
+ * ($PAIR070, RAM-only — safe to send every boot) and active interference
+ * cancellation ($PAIR074, ensured to match the `aic_enabled` setting; the
+ * BG95 LTE modem transmits centimetres from the GNSS front-end). */
+static esp_err_t apply_quality_config(void)
+{
+    int threshold = 5;
+    bool want_aic = true;
+
+    if (gps_settings_is_configured())
+    {
+        threshold = gps_settings()->static_nav_threshold;
+        want_aic  = gps_settings()->aic_enabled;
+    }
+
+    char cmd[32];
+    char body[24];
+
+    snprintf(body, sizeof(body), "PAIR070,%d", threshold);
+    agnss_build_pair_cmd(cmd, sizeof(cmd), body);
+
+    esp_err_t err = pair_send_and_wait_ack(70, cmd, 2000);
+    if (err != ESP_OK)
+    {
+        return err;
+    }
+    ESP_LOGI(TAG, "Static nav threshold set: %d dm/s%s", threshold,
+             threshold == 0 ? " (off)" : "");
+
+    /* AIC: query, then set only on mismatch */
+    esp_err_t lock_err = agnss_pair_lock_take(pdMS_TO_TICKS(3250));
+    if (lock_err != ESP_OK)
+    {
+        return lock_err;
+    }
+
+    agnss_build_pair_cmd(cmd, sizeof(cmd), "PAIR075");
+    err = gps_uart_write(cmd, strlen(cmd));
+    if (err != ESP_OK)
+    {
+        agnss_pair_lock_give();
+        return err;
+    }
+
+    int64_t deadline = esp_timer_get_time() / 1000 + 3000;
+
+    while ((esp_timer_get_time() / 1000) < deadline)
+    {
+        uint32_t remaining = (uint32_t)(deadline - esp_timer_get_time() / 1000);
+        if (remaining == 0)
+        {
+            break;
+        }
+
+        char line[160];
+        if (gps_pair_response_wait(line, sizeof(line), remaining) != ESP_OK)
+        {
+            break;
+        }
+
+        if (strncmp(line, "$PAIR001,075,", 13) == 0 && line[13] >= '2')
+        {
+            ESP_LOGW(TAG, "AIC status query rejected by module (%s)", line);
+            agnss_pair_lock_give();
+            return ESP_ERR_NOT_SUPPORTED;
+        }
+
+        if (strncmp(line, "$PAIR075,", 9) == 0)
+        {
+            int aic_on = atoi(line + 9);
+
+            ESP_LOGI(TAG, "AIC: enabled=%d (want %d)", aic_on, want_aic);
+            agnss_pair_lock_give();
+
+            if ((aic_on == 1) == want_aic)
+            {
+                return ESP_OK;
+            }
+
+            snprintf(body, sizeof(body), "PAIR074,%d", want_aic ? 1 : 0);
+            agnss_build_pair_cmd(cmd, sizeof(cmd), body);
+            return pair_send_and_wait_ack(74, cmd, 2000);
+        }
+    }
+
+    ESP_LOGW(TAG, "AIC status query timed out");
+    agnss_pair_lock_give();
+    return ESP_ERR_TIMEOUT;
+}
+
 /* -----------------------------------------------------------------------
  * EASY save
  * ----------------------------------------------------------------------- */
@@ -763,6 +853,12 @@ static void agnss_init_task(void *arg)
                               AGNSS_INIT_STEP_RETRY_MS,
                               true);
     }
+
+    /* 1b. Fix-quality config: static-nav threshold + AIC (settings-gated) */
+    (void)retry_init_step("GNSS quality config",
+                          apply_quality_config,
+                          AGNSS_INIT_STEP_RETRY_MS,
+                          true);
 
     /* 2. Inject reference position from NVS (best-effort) */
     if (retry_init_step("Reference position injection",

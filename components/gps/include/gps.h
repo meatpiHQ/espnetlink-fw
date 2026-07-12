@@ -120,6 +120,12 @@ typedef struct
     int  epoc_constellation; /* PAIR498 mask from "epoc_constellation":
                                 1=GPS, 3=GPS+Galileo, 5=GPS+BDS (the only
                                 configs the LC76G EPOC supports)            */
+    int  static_nav_threshold; /* PAIR070 static-navigation speed threshold,
+                                  dm/s 0-20 (0 = off): below it the module
+                                  pins the position and zeroes speed — kills
+                                  parked jitter at the source               */
+    bool aic_enabled;   /* PAIR074 active interference cancellation
+                           (default on — the LTE modem is centimetres away) */
 } gps_settings_t;
 
 /** Register the "gps" settings descriptor. Called by main between

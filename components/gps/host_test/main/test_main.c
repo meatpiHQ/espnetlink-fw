@@ -58,7 +58,21 @@ void test_defaults_applied_and_cli_registered(void)
     TEST_ASSERT_EQUAL(120, cfg->agnss_cache_s);
     TEST_ASSERT_TRUE(cfg->cli);
     TEST_ASSERT_EQUAL(3, cfg->epoc_constellation); /* gps_galileo default */
+    TEST_ASSERT_EQUAL(5, cfg->static_nav_threshold); /* 0.5 m/s default   */
+    TEST_ASSERT_TRUE(cfg->aic_enabled);
     TEST_ASSERT_EQUAL(2, s_cli_registrations);
+}
+
+/* static_nav_threshold carries a 0..20 dm/s range (0 = off). */
+void test_static_nav_threshold_range(void)
+{
+    fixture_reset();
+    TEST_ASSERT_EQUAL(ESP_OK, settings_manager_start());
+
+    TEST_ASSERT_NOT_EQUAL(ESP_OK,
+                          gps_settings_persist_int("static_nav_threshold", 21));
+    TEST_ASSERT_EQUAL(ESP_OK,
+                      gps_settings_persist_int("static_nav_threshold", 0));
 }
 
 /* epoc_constellation is a closed enum (gps|gps_galileo|gps_bds): schema
@@ -167,6 +181,7 @@ void app_main(void)
 
     RUN_TEST(test_defaults_applied_and_cli_registered);
     RUN_TEST(test_cache_interval_range_enforced);
+    RUN_TEST(test_static_nav_threshold_range);
     RUN_TEST(test_epoc_constellation_enum);
     RUN_TEST(test_persist_is_reboot_to_apply);
     RUN_TEST(test_cli_gate_off_after_reboot);

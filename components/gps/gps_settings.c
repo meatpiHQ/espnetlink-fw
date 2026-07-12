@@ -29,6 +29,12 @@ static const settings_field_t FIELDS[] =
      * only these three configs exist). Applied via $PAIR498 at AGNSS init. */
     SETTINGS_STR_ENUM("epoc_constellation", "gps,gps_galileo,gps_bds",
                       "gps_galileo"),
+    /* $PAIR070 static-navigation speed threshold in dm/s (0 = off). Default
+     * 5 (0.5 m/s): parked positions stop jittering, walking still tracks. */
+    SETTINGS_INT ("static_nav_threshold", 0, 20, 5),
+    /* $PAIR074 active interference cancellation — the BG95 LTE modem
+     * transmits centimetres from the GNSS front-end; default ON. */
+    SETTINGS_BOOL("aic_enabled", true),
 };
 
 static gps_settings_t s_cfg;
@@ -81,6 +87,13 @@ static esp_err_t on_apply(const cJSON *settings)
                                                 : 120;
     s_cfg.cli           = get_bool(settings, "cli", true);
     s_cfg.epoc_constellation = epoc_constellation_mask(settings);
+
+    const cJSON *snav = cJSON_GetObjectItemCaseSensitive(settings,
+                                                         "static_nav_threshold");
+
+    s_cfg.static_nav_threshold = cJSON_IsNumber(snav)
+                                     ? (int)snav->valuedouble : 5;
+    s_cfg.aic_enabled   = get_bool(settings, "aic_enabled", true);
     s_configured        = true;
 
     /* §6b: the component registers its own console commands on the boot
