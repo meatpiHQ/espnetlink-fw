@@ -27,7 +27,6 @@ static char s_endpoint[64];
 static char s_priv[64];
 static char s_pub[64];
 static char s_psk[64];
-static char s_allow[32];
 static char s_mask[32];
 
 static bool resolve_ipv4(const char *host, char *out, size_t len)
@@ -85,32 +84,39 @@ esp_err_t vpn_wg_up(const vpn_config_t *cfg)
         s_cfg.preshared_key = s_psk;
     }
 
-    /* esp_wireguard's allowed_ip is the LOCAL tunnel IP; 0.0.0.0 (the
-     * route-everything idiom) falls back to Interface Address /32 */
-    if (cfg->allowed_ip[0] != '\0' &&
-        strcmp(cfg->allowed_ip, "0.0.0.0") != 0)
-    {
-        strlcpy(s_allow, cfg->allowed_ip, sizeof(s_allow));
-        s_cfg.allowed_ip = s_allow;
+    /* esp_wireguard's allowed_ip is the LOCAL netif IP (upstream field name;
+     * esp_wireguard.h: "a local IP address") — it must ALWAYS be
+     * Interface.Address. AllowedIPs contributes only the netif MASK: lwip
+     * routes dest&mask == addr&mask into the tunnel. Passing the AllowedIPs
+     * NETWORK address as the netif IP (the old behaviour, WiCAN too) brought
+     * the interface up as e.g. 10.8.0.0 — inbound tunnel packets to the real
+     * address were never "for us" and replies never routed back
+     * (data-plane bug found on the 2026-07-12 LTE bench). */
+    strlcpy(s_addr, cfg->address, sizeof(s_addr));
 
-        if (cfg->allowed_ip_mask[0] != '\0')
-        {
-            strlcpy(s_mask, cfg->allowed_ip_mask, sizeof(s_mask));
-            s_cfg.allowed_ip_mask = s_mask;
-        }
+    char *slash = strchr(s_addr, '/');
+
+    if (slash != NULL)
+    {
+        *slash = '\0';
+    }
+
+    s_cfg.allowed_ip = s_addr;
+
+    if (cfg->allowed_ip[0] != '\0' &&
+        strcmp(cfg->allowed_ip, "0.0.0.0") != 0 &&
+        cfg->allowed_ip_mask[0] != '\0')
+    {
+        /* route the AllowedIPs subnet via the tunnel */
+        strlcpy(s_mask, cfg->allowed_ip_mask, sizeof(s_mask));
+        s_cfg.allowed_ip_mask = s_mask;
+        ESP_LOGI(TAG, "WG netif %s mask %s (AllowedIPs %s)", s_addr, s_mask,
+                 cfg->allowed_ip);
     }
     else
     {
-        strlcpy(s_addr, cfg->address, sizeof(s_addr));
-
-        char *slash = strchr(s_addr, '/');
-
-        if (slash != NULL)
-        {
-            *slash = '\0';
-        }
-
-        s_cfg.allowed_ip = s_addr;
+        /* 0.0.0.0 (route-everything idiom) or none: /32 — the
+         * default_route flag decides whether everything rides the tunnel */
         s_cfg.allowed_ip_mask = "255.255.255.255";
         ESP_LOGI(TAG, "local WG IP from address: %s/32", s_addr);
     }

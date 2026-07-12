@@ -13,8 +13,12 @@ import pytest
 def test_wifi_manager(dut):
     dut.expect_exact("INIT ok=1")
 
-    # Boot pass applied schema defaults (first boot).
-    dut.expect_exact("SETTINGS mode=apsta ap_channel=6")
+    # Boot pass applied schema defaults (first boot). ESPNetLink's shipping
+    # default is AP-only (wifi_manager_settings.c, meatpi 2026-07-05) — not
+    # WiCAN's apsta. NOTE: needs a virgin settings partition; the suite
+    # itself persists ap_channel=11 at the end (SET-OK), so a rerun without
+    # erasing the settings partition sees 11 here.
+    dut.expect_exact("SETTINGS mode=ap ap_channel=6")
 
     dut.expect_exact("START ok=1")
 

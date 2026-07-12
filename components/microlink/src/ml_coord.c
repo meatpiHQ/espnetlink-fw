@@ -339,7 +339,7 @@ static int fetch_custom_server_key(microlink_t *ml) {
         if (r <= 0) break;
         total += r;
     }
-    buf[total] = ' ';
+    buf[total] = '\0';
 
     char *p = strstr(buf, "\"publicKey\"");
     if (!p) p = strstr(buf, "\"PublicKey\"");
@@ -380,7 +380,7 @@ static int do_noise_handshake(microlink_t *ml, ml_noise_state_t *noise) {
     /* Initialize Noise state with our machine key and the server key —
      * hardcoded Tailscale default, or fetched from /key for custom
      * coordinators (WiCAN addition, see fetch_custom_server_key) */
-    if (ml->ctrl_host[0] != ' ') {
+    if (ml->ctrl_host[0] != '\0') {
         if (fetch_custom_server_key(ml) != 0) {
             ESP_LOGE(TAG, "Cannot get coordinator Noise key; aborting handshake");
             return -1;

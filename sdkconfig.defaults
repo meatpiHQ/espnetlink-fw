@@ -6,6 +6,12 @@ CONFIG_IDF_TARGET="esp32s3"
 #
 CONFIG_COMPILER_CXX_EXCEPTIONS=y
 
+# Warnings stay warnings (matches the product sdkconfig; test_apps inherit).
+# Needed since GCC 15 (IDF v6 toolchain): the vendored WireGuard/NaCl crypto
+# (wireguard_lwip, microlink — byte-parity with WiCAN v6) uses exact-fit
+# string initializers that trip -Werror=unterminated-string-initialization.
+CONFIG_COMPILER_DISABLE_DEFAULT_ERRORS=y
+
 # Product flash layout (PRODUCT.md): OTA slots + dedicated settings partition.
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="espnetlink_partitions_table.csv"

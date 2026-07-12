@@ -7,3 +7,8 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../../../espnetlink_partitions_table.csv
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 # Test-only: the serial-capture harness reads at 115200.
 CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
+# Test-only: the runtime-level test raises lm_test to DEBUG and expects the
+# ESP_LOGD line to reach the sink — impossible when the product's
+# LOG_MAXIMUM_LEVEL=INFO compiles LOGD out. Allow DEBUG at compile time
+# here; the DEFAULT level stays INFO like the product.
+CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y

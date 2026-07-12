@@ -276,23 +276,22 @@ void app_main(void)
     cJSON_InitHooks((cJSON_Hooks *)&CJSON_PSRAM);
 
     // Log reset and wakeup reason at boot time, before any long startup delays.
-    esp_sleep_wakeup_cause_t wakeup = esp_sleep_get_wakeup_cause();
+    // IDF v6: esp_sleep_get_wakeup_causes() returns a BIT(cause) bitmap
+    // (the singular esp_sleep_get_wakeup_cause() is deprecated).
+    uint32_t wakeup_causes = esp_sleep_get_wakeup_causes();
     esp_reset_reason_t reset_reason = esp_reset_reason();
     ESP_LOGW("main", "Reset reason: %d", (int)reset_reason);
-    if (wakeup != ESP_SLEEP_WAKEUP_UNDEFINED)
+    if (!(wakeup_causes & BIT(ESP_SLEEP_WAKEUP_UNDEFINED)) && wakeup_causes != 0)
     {
         const char *reason = "unknown";
-        switch (wakeup)
-        {
-        case ESP_SLEEP_WAKEUP_EXT0:      reason = "EXT0";      break;
-        case ESP_SLEEP_WAKEUP_EXT1:      reason = "EXT1";      break;
-        case ESP_SLEEP_WAKEUP_TIMER:     reason = "TIMER";     break;
-        case ESP_SLEEP_WAKEUP_TOUCHPAD:  reason = "TOUCHPAD";  break;
-        case ESP_SLEEP_WAKEUP_ULP:       reason = "ULP";       break;
-        case ESP_SLEEP_WAKEUP_GPIO:      reason = "GPIO";      break;
-        default: break;
-        }
-        ESP_LOGW("main", "Woke from deep sleep, cause: %s (%d)", reason, (int)wakeup);
+        if      (wakeup_causes & BIT(ESP_SLEEP_WAKEUP_EXT0))     reason = "EXT0";
+        else if (wakeup_causes & BIT(ESP_SLEEP_WAKEUP_EXT1))     reason = "EXT1";
+        else if (wakeup_causes & BIT(ESP_SLEEP_WAKEUP_TIMER))    reason = "TIMER";
+        else if (wakeup_causes & BIT(ESP_SLEEP_WAKEUP_TOUCHPAD)) reason = "TOUCHPAD";
+        else if (wakeup_causes & BIT(ESP_SLEEP_WAKEUP_ULP))      reason = "ULP";
+        else if (wakeup_causes & BIT(ESP_SLEEP_WAKEUP_GPIO))     reason = "GPIO";
+        ESP_LOGW("main", "Woke from deep sleep, cause: %s (bitmap 0x%x)",
+                 reason, (unsigned)wakeup_causes);
     }
 
 
