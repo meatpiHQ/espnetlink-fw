@@ -49,7 +49,11 @@ static const char *TAG = "usb_dev_ethernet";
 #define CDC_MAX_MPS 64
 #endif
 
-#if CONFIG_USBNET_CLASS_ECM
+#if CONFIG_USBNET_CLASS_NCM
+#define USBNET_ETH_DESCRIPTOR_LEN CDC_NCM_ALT_DESCRIPTOR_LEN
+#define USBNET_ETH_DESCRIPTOR_INIT(first, int_ep, out_ep, in_ep, mps, str) \
+    CDC_NCM_ALT_DESCRIPTOR_INIT(first, int_ep, out_ep, in_ep, mps, 1514, str)
+#elif CONFIG_USBNET_CLASS_ECM
 #define USBNET_ETH_DESCRIPTOR_LEN CDC_ECM_DESCRIPTOR_LEN
 #define USBNET_ETH_DESCRIPTOR_INIT(first, int_ep, out_ep, in_ep, mps, str) \
     CDC_ECM_DESCRIPTOR_INIT(first, int_ep, out_ep, in_ep, mps, str)
@@ -76,6 +80,8 @@ static SemaphoreHandle_t s_tx_done_sem = NULL;
 
 #define USBNET_EVT_CONFIGURED (1u << 0)
 #define USBNET_EVT_DISCONNECT (1u << 1)
+#define USBNET_EVT_LINK_UP    (1u << 2) /* NCM: host selected data alt 1 */
+#define USBNET_EVT_LINK_DOWN  (1u << 3)
 
 // -------------------------
 // Descriptors (advance-desc)
@@ -85,14 +91,14 @@ static const uint8_t s_device_descriptor[] = {
     USB_DEVICE_DESCRIPTOR_INIT(USB_2_0, 0xEF, 0x02, 0x01, USBD_VID, USBD_PID, 0x0100, 0x01),
 };
 
-static const uint8_t s_config_descriptor_rndis[] = {
-    USB_CONFIG_DESCRIPTOR_INIT(USB_CONFIG_SIZE_RNDIS, 0x02, 0x01, USB_CONFIG_BUS_POWERED, USBD_MAX_POWER_MA),
-    CDC_RNDIS_DESCRIPTOR_INIT(0x00, CDC_INT_EP, CDC_OUT_EP, CDC_IN_EP, CDC_MAX_MPS, USB_STRING_RNDIS_INTF_INDEX),
+static const uint8_t s_config_descriptor_eth[] = {
+    USB_CONFIG_DESCRIPTOR_INIT(USB_CONFIG_SIZE_ETH, 0x02, 0x01, USB_CONFIG_BUS_POWERED, USBD_MAX_POWER_MA),
+    USBNET_ETH_DESCRIPTOR_INIT(0x00, CDC_INT_EP, CDC_OUT_EP, CDC_IN_EP, CDC_MAX_MPS, USB_STRING_ETH_INTF_INDEX),
 };
 
-static const uint8_t s_config_descriptor_rndis_cdc[] = {
-    USB_CONFIG_DESCRIPTOR_INIT(USB_CONFIG_SIZE_RNDIS_CDC, 0x04, 0x01, USB_CONFIG_BUS_POWERED, USBD_MAX_POWER_MA),
-    CDC_RNDIS_DESCRIPTOR_INIT(0x00, CDC_INT_EP, CDC_OUT_EP, CDC_IN_EP, CDC_MAX_MPS, USB_STRING_RNDIS_INTF_INDEX),
+static const uint8_t s_config_descriptor_eth_cdc[] = {
+    USB_CONFIG_DESCRIPTOR_INIT(USB_CONFIG_SIZE_ETH_CDC, 0x04, 0x01, USB_CONFIG_BUS_POWERED, USBD_MAX_POWER_MA),
+    USBNET_ETH_DESCRIPTOR_INIT(0x00, CDC_INT_EP, CDC_OUT_EP, CDC_IN_EP, CDC_MAX_MPS, USB_STRING_ETH_INTF_INDEX),
     // CDC-ACM console uses interface numbers 0x02 and 0x03
     CDC_ACM_DESCRIPTOR_INIT(0x02, 0x84, 0x04, 0x82, CDC_MAX_MPS, USB_STRING_CONSOLE_INTF_INDEX),
 };
@@ -110,18 +116,22 @@ static const uint8_t s_device_quality_descriptor[] = {
     0x00,
 };
 
-#define USB_MAC_STRING_DESC_LEN   sizeof("001122334455")
-#define USB_RNDIS_STRING_DESC_LEN sizeof("RNDIS 001122334455")
+#define USB_MAC_STRING_DESC_LEN sizeof("001122334455")
+#define USB_ETH_STRING_DESC_LEN sizeof("RNDIS 001122334455")
 
 static char s_serial_string_descriptor[USB_MAC_STRING_DESC_LEN] = "000000000003";
-static char s_rndis_string_descriptor[USB_RNDIS_STRING_DESC_LEN] = "RNDIS";
+/* RNDIS: interface name; ECM: the host adapter's MAC as 12 hex chars */
+static char s_eth_string_descriptor[USB_ETH_STRING_DESC_LEN] = "000000000002";
 
 static const char *s_string_descriptors[] = {
     (const char[]){ 0x09, 0x04 },
+    /* Windows composes the adapter name as "<manufacturer> <product>", so
+     * the product must not repeat the manufacturer (was "ESPNetLink
+     * ESPNetLink CDC-NCM" in Device Manager). Same scheme as WiCAN Pro. */
+    "MeatPi Electronics",
     "ESPNetLink",
-    "ESPNetLink RNDIS",
     s_serial_string_descriptor,
-    s_rndis_string_descriptor,
+    s_eth_string_descriptor,
     "Console",
 };
 
@@ -137,10 +147,10 @@ static const uint8_t *config_descriptor_callback(uint8_t speed)
 
     if (s_console_enabled)
     {
-        return s_config_descriptor_rndis_cdc;
+        return s_config_descriptor_eth_cdc;
     }
 
-    return s_config_descriptor_rndis;
+    return s_config_descriptor_eth;
 }
 
 static const uint8_t *device_quality_descriptor_callback(uint8_t speed)
@@ -158,7 +168,7 @@ static const char *string_descriptor_callback(uint8_t speed, uint8_t index)
         return NULL;
     }
 
-    if ((index == USB_STRING_SERIAL_INDEX) || (index == USB_STRING_RNDIS_INTF_INDEX))
+    if ((index == USB_STRING_SERIAL_INDEX) || (index == USB_STRING_ETH_INTF_INDEX))
     {
         uint8_t mac[6] = { 0 };
         esp_err_t err = esp_read_mac(mac, ESP_MAC_WIFI_STA);
@@ -175,8 +185,19 @@ static const char *string_descriptor_callback(uint8_t speed, uint8_t index)
                            mac[4],
                            mac[5]);
 
-            (void)snprintf(s_rndis_string_descriptor,
-                           sizeof(s_rndis_string_descriptor),
+#if CONFIG_USBNET_CLASS_ECM || CONFIG_USBNET_CLASS_NCM
+            /* iMACAddress: the MAC the HOST adapter uses — same locally
+             * administered dev_mac^1 the RNDIS build assigns (set up in
+             * usbnet_usb_start before usbd_initialize). */
+            const uint8_t *hm = usbnet_state()->rndis_host_mac;
+
+            (void)snprintf(s_eth_string_descriptor,
+                           sizeof(s_eth_string_descriptor),
+                           "%02X%02X%02X%02X%02X%02X",
+                           hm[0], hm[1], hm[2], hm[3], hm[4], hm[5]);
+#else
+            (void)snprintf(s_eth_string_descriptor,
+                           sizeof(s_eth_string_descriptor),
                            "RNDIS %02X%02X%02X%02X%02X%02X",
                            mac[0],
                            mac[1],
@@ -184,12 +205,17 @@ static const char *string_descriptor_callback(uint8_t speed, uint8_t index)
                            mac[3],
                            mac[4],
                            mac[5]);
+#endif
         }
         else
         {
             ESP_LOGW(TAG, "esp_read_mac failed for USB string (%d)", (int)err);
             (void)snprintf(s_serial_string_descriptor, sizeof(s_serial_string_descriptor), "000000000003");
-            (void)snprintf(s_rndis_string_descriptor, sizeof(s_rndis_string_descriptor), "RNDIS");
+#if CONFIG_USBNET_CLASS_ECM || CONFIG_USBNET_CLASS_NCM
+            (void)snprintf(s_eth_string_descriptor, sizeof(s_eth_string_descriptor), "020000000002");
+#else
+            (void)snprintf(s_eth_string_descriptor, sizeof(s_eth_string_descriptor), "RNDIS");
+#endif
         }
     }
 
@@ -207,10 +233,8 @@ static const struct usb_descriptor s_usb_desc = {
 // RX/TX pacing + tasks
 // -------------------------
 
-void usbd_rndis_data_recv_done(uint32_t len)
+void usbnet_usb_notify_rx(void)
 {
-    (void)len;
-
     if (!s_rx_task)
     {
         return;
@@ -231,10 +255,8 @@ void usbd_rndis_data_recv_done(uint32_t len)
     }
 }
 
-void usbd_rndis_data_send_done(uint32_t len)
+void usbnet_usb_notify_tx_done(void)
 {
-    (void)len;
-
     if (!s_tx_done_sem)
     {
         return;
@@ -254,6 +276,41 @@ void usbd_rndis_data_send_done(uint32_t len)
         (void)xSemaphoreGive(s_tx_done_sem);
     }
 }
+
+static void usbnet_notify_evt(uint32_t bits);
+
+void usbnet_usb_notify_link(bool up)
+{
+    usbnet_notify_evt(up ? USBNET_EVT_LINK_UP : USBNET_EVT_LINK_DOWN);
+}
+
+/* RNDIS/ECM data callbacks (NCM's live in usbnet_ncm.c — its RX needs the
+ * NTB length latched before the wake) */
+#if CONFIG_USBNET_CLASS_ECM
+void usbd_cdc_ecm_data_recv_done(uint32_t len)
+{
+    (void)len;
+    usbnet_usb_notify_rx();
+}
+
+void usbd_cdc_ecm_data_send_done(uint32_t len)
+{
+    (void)len;
+    usbnet_usb_notify_tx_done();
+}
+#elif CONFIG_USBNET_CLASS_RNDIS
+void usbd_rndis_data_recv_done(uint32_t len)
+{
+    (void)len;
+    usbnet_usb_notify_rx();
+}
+
+void usbd_rndis_data_send_done(uint32_t len)
+{
+    (void)len;
+    usbnet_usb_notify_tx_done();
+}
+#endif
 
 static void usbnet_rx_task(void *arg)
 {
@@ -282,17 +339,46 @@ static void usbnet_evt_task(void *arg)
         uint32_t bits = 0;
         (void)xTaskNotifyWait(0, UINT32_MAX, &bits, portMAX_DELAY);
 
-        if ((bits & USBNET_EVT_DISCONNECT) != 0u)
+#if CONFIG_USBNET_CLASS_NCM
+        /* NCM: the data path opens when the host selects data alt 1
+         * (link_event), NOT at set-configuration — the data endpoints
+         * don't exist in alt 0. CONFIGURED only arms the console. */
+        if ((bits & (USBNET_EVT_DISCONNECT | USBNET_EVT_LINK_DOWN)) != 0u)
         {
-            ESP_LOGI(TAG, "USB disconnected/reset");
-            (void)usbd_rndis_set_connect(false);
+            ESP_LOGI(TAG, "USB %s", (bits & USBNET_EVT_DISCONNECT) != 0u
+                                        ? "disconnected/reset" : "NCM link down");
+            usbnet_ncm_stop();
             (void)tcpip_callback_with_block(usbnet_lwip_stop_in_tcpip, NULL, 1);
         }
 
         if ((bits & USBNET_EVT_CONFIGURED) != 0u)
         {
             ESP_LOGI(TAG, "USB configured");
-            (void)usbd_rndis_set_connect(true);
+
+            if (s_console_enabled)
+            {
+                usb_cli_console_usb_on_configured(0);
+            }
+        }
+
+        if ((bits & USBNET_EVT_LINK_UP) != 0u)
+        {
+            ESP_LOGI(TAG, "NCM link up (data alt 1)");
+            usbnet_ncm_start();
+            (void)tcpip_callback_with_block(usbnet_lwip_start_in_tcpip, NULL, 1);
+        }
+#else
+        if ((bits & USBNET_EVT_DISCONNECT) != 0u)
+        {
+            ESP_LOGI(TAG, "USB disconnected/reset");
+            usbnet_class_set_connect(false);
+            (void)tcpip_callback_with_block(usbnet_lwip_stop_in_tcpip, NULL, 1);
+        }
+
+        if ((bits & USBNET_EVT_CONFIGURED) != 0u)
+        {
+            ESP_LOGI(TAG, "USB configured");
+            usbnet_class_set_connect(true);
 
             if (s_console_enabled)
             {
@@ -301,38 +387,13 @@ static void usbnet_evt_task(void *arg)
 
             (void)tcpip_callback_with_block(usbnet_lwip_start_in_tcpip, NULL, 1);
         }
+#endif
     }
 }
 
-static void usbnet_usbd_event_handler(uint8_t busid, uint8_t event)
+static void usbnet_notify_evt(uint32_t bits)
 {
-    (void)busid;
-
-    if (!s_evt_task)
-    {
-        return;
-    }
-
-    uint32_t notify_bits = 0;
-
-    switch (event)
-    {
-        case USBD_EVENT_CONFIGURED:
-        {
-            notify_bits = USBNET_EVT_CONFIGURED;
-            break;
-        }
-        case USBD_EVENT_DISCONNECTED:
-        case USBD_EVENT_RESET:
-        {
-            notify_bits = USBNET_EVT_DISCONNECT;
-            break;
-        }
-        default:
-            break;
-    }
-
-    if (notify_bits == 0)
+    if (!s_evt_task || bits == 0)
     {
         return;
     }
@@ -340,7 +401,7 @@ static void usbnet_usbd_event_handler(uint8_t busid, uint8_t event)
     if (xPortInIsrContext())
     {
         BaseType_t hp_task_woken = pdFALSE;
-        (void)xTaskNotifyFromISR(s_evt_task, notify_bits, eSetBits, &hp_task_woken);
+        (void)xTaskNotifyFromISR(s_evt_task, bits, eSetBits, &hp_task_woken);
         if (hp_task_woken)
         {
             portYIELD_FROM_ISR();
@@ -348,7 +409,29 @@ static void usbnet_usbd_event_handler(uint8_t busid, uint8_t event)
     }
     else
     {
-        (void)xTaskNotify(s_evt_task, notify_bits, eSetBits);
+        (void)xTaskNotify(s_evt_task, bits, eSetBits);
+    }
+}
+
+static void usbnet_usbd_event_handler(uint8_t busid, uint8_t event)
+{
+    (void)busid;
+
+    switch (event)
+    {
+        case USBD_EVENT_CONFIGURED:
+        {
+            usbnet_notify_evt(USBNET_EVT_CONFIGURED);
+            break;
+        }
+        case USBD_EVENT_DISCONNECTED:
+        case USBD_EVENT_RESET:
+        {
+            usbnet_notify_evt(USBNET_EVT_DISCONNECT);
+            break;
+        }
+        default:
+            break;
     }
 }
 
@@ -427,7 +510,8 @@ void usbnet_usb_start(void)
     st->rndis_host_mac[0] = (uint8_t)((st->rndis_host_mac[0] | 0x02) & 0xFE);
 
     ESP_LOGI(TAG,
-             "Starting CherryUSB RNDIS%s (netif MAC %02X:%02X:%02X:%02X:%02X:%02X, Windows adapter MAC %02X:%02X:%02X:%02X:%02X:%02X)",
+             "Starting CherryUSB " USBNET_CLASS_NAME
+             "%s (netif MAC %02X:%02X:%02X:%02X:%02X:%02X, host adapter MAC %02X:%02X:%02X:%02X:%02X:%02X)",
              s_console_enabled ? "+CDC" : "",
              dev_mac[0],
              dev_mac[1],
@@ -450,10 +534,18 @@ void usbnet_usb_start(void)
 #endif
 
     // Add interfaces in the exact order they appear in the config descriptor:
-    // - RNDIS: interfaces 0..1
+    // - USB Ethernet (ECM or RNDIS): interfaces 0..1
     // - CDC-ACM console (optional): interfaces 2..3
-    usbd_add_interface(0, usbd_rndis_init_intf(&s_rndis_intf0, CDC_OUT_EP, CDC_IN_EP, CDC_INT_EP, st->rndis_host_mac));
-    usbd_add_interface(0, usbd_rndis_init_intf(&s_rndis_intf1, CDC_OUT_EP, CDC_IN_EP, CDC_INT_EP, st->rndis_host_mac));
+#if CONFIG_USBNET_CLASS_NCM
+    usbd_add_interface(0, usbd_cdc_ncm_init_intf(&s_eth_intf0, CDC_INT_EP, CDC_OUT_EP, CDC_IN_EP));
+    usbd_add_interface(0, usbd_cdc_ncm_init_data_intf(&s_eth_intf1));
+#elif CONFIG_USBNET_CLASS_ECM
+    usbd_add_interface(0, usbd_cdc_ecm_init_intf(&s_eth_intf0, CDC_INT_EP, CDC_OUT_EP, CDC_IN_EP));
+    usbd_add_interface(0, usbd_cdc_ecm_init_intf(&s_eth_intf1, CDC_INT_EP, CDC_OUT_EP, CDC_IN_EP));
+#else
+    usbd_add_interface(0, usbd_rndis_init_intf(&s_eth_intf0, CDC_OUT_EP, CDC_IN_EP, CDC_INT_EP, st->rndis_host_mac));
+    usbd_add_interface(0, usbd_rndis_init_intf(&s_eth_intf1, CDC_OUT_EP, CDC_IN_EP, CDC_INT_EP, st->rndis_host_mac));
+#endif
 
     if (s_console_enabled)
     {

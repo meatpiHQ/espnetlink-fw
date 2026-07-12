@@ -1,4 +1,5 @@
-"""On-target smoke for usb_dev_ethernet: RNDIS device stack + raw-lwip
+"""On-target smoke for usb_dev_ethernet: the USB-Ethernet device stack
+(CDC-NCM default; RNDIS/ECM via the USBNET_CLASS Kconfig choice) + raw-lwip
 netif + DHCP server come up and stay up on the main firmware config.
 
 Run on hardware:

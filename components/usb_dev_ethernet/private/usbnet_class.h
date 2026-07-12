@@ -12,7 +12,31 @@
 
 #include "sdkconfig.h"
 
-#if CONFIG_USBNET_CLASS_ECM
+#if CONFIG_USBNET_CLASS_NCM
+
+#include "usbd_cdc_ncm.h"
+
+#include "lwip/pbuf.h"
+
+#define USBNET_CLASS_NAME "CDC-NCM"
+
+/* usbnet_ncm.c adapts the NTB-level class APIs to the pbuf contract */
+struct pbuf *usbnet_ncm_eth_rx(void);
+int usbnet_ncm_eth_tx(struct pbuf *p);
+void usbnet_ncm_start(void);
+void usbnet_ncm_stop(void);
+
+#define usbnet_class_eth_rx() usbnet_ncm_eth_rx()
+#define usbnet_class_eth_tx(p) usbnet_ncm_eth_tx(p)
+
+static inline void usbnet_class_set_connect(bool connect)
+{
+    /* NCM link state is host-driven (data-interface alt setting); the
+     * class raises usbd_cdc_ncm_link_event() — nothing to assert here. */
+    (void)connect;
+}
+
+#elif CONFIG_USBNET_CLASS_ECM
 
 #include "usbd_cdc_ecm.h"
 

@@ -17,9 +17,9 @@
 #include "dhcpserver/dhcpserver_options.h"
 
 #include "usbd_core.h"
-#include "usbd_rndis.h"
 #include "usb_errno.h"
 
+#include "private/usbnet_class.h"
 #include "private/usbnet_dhcp_debug.h"
 #include "private/usbnet_state.h"
 #include "private/usbnet_usb.h"
@@ -36,7 +36,7 @@ static err_t usbnet_linkoutput(struct netif *netif, struct pbuf *p)
 
     for (int attempt = 0; attempt < 20; attempt++)
     {
-        int ret = usbd_rndis_eth_tx(p);
+        int ret = usbnet_class_eth_tx(p);
         if (ret == 0)
         {
             return ERR_OK;
@@ -96,7 +96,7 @@ void usbnet_lwip_input_in_tcpip(void *arg)
 
     while (true)
     {
-        struct pbuf *p = usbd_rndis_eth_rx();
+        struct pbuf *p = usbnet_class_eth_rx();
         if (!p)
         {
             break;

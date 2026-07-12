@@ -21,15 +21,21 @@ CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_TINYUSB_CDC_ENABLED=y
 CONFIG_TINYUSB_CDC_COUNT=2
 
-# CherryUSB (device) - RNDIS for Windows-friendly USB Ethernet
+# CherryUSB (device) - USB Ethernet + CDC console composite. The cherryusb
+# component is VENDORED (components/cherryusb — meatpiHQ fork with the
+# WiCAN-authored device-side CDC-NCM class); its ESP CMake branch hardcodes
+# the device/host class enables, so no CHERRYUSB_DEVICE_CDC_* pins here.
+# USB Ethernet class choice (usb_dev_ethernet Kconfig): CDC-NCM default —
+# Windows' in-box UsbNcm.sys (Win11 24H2 removed RNDIS), native on
+# macOS/Linux. RNDIS = legacy-Win10 option; ECM = macOS/Linux-only option
+# (Win11 26200 bench-verified: NO in-box ECM driver).
 CONFIG_CHERRYUSB=y
 CONFIG_CHERRYUSB_DEVICE=y
 CONFIG_CHERRYUSB_DEVICE_SPEED_FS=y
 CONFIG_CHERRYUSB_DEVICE_DWC2_ESP=y
-CONFIG_CHERRYUSB_DEVICE_CDC_RNDIS=y
 CONFIG_CHERRYUSB_DEVICE_CDC_ACM=y
-CONFIG_USBDEV_RNDIS_USING_LWIP=y
 CONFIG_CHERRYUSB_DEVICE_TEMPLATE_NONE=y
+CONFIG_USBNET_CLASS_NCM=y
 
 # PSRAM: 8MB embedded octal (AP_3v3) — MeatPi standard §2. Static data,
 # task stacks, and reboot-surviving state default to PSRAM; memtest stays

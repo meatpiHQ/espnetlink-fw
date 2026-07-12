@@ -1,7 +1,8 @@
 /**
  * @file test_usbnet_main.c
- * @brief On-target smoke for usb_dev_ethernet: CherryUSB RNDIS device
- *        stack + raw-lwip netif + per-netif DHCP server come up without
+ * @brief On-target smoke for usb_dev_ethernet: the CherryUSB USB-Ethernet
+ *        device stack (CDC-NCM default; RNDIS/ECM via USBNET_CLASS Kconfig)
+ *        + raw-lwip netif + per-netif DHCP server come up without
  *        panic on the main partition table/PSRAM config. With a USB host
  *        attached (the bench PC), enumeration and a DHCP lease happen
  *        on top — that part is observed from the host side, not here.

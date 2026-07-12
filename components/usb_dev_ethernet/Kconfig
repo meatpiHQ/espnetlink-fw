@@ -2,27 +2,29 @@ menu "USB Ethernet (usb_dev_ethernet)"
 
     choice USBNET_CLASS
         prompt "USB Ethernet device class"
-        default USBNET_CLASS_ECM
+        default USBNET_CLASS_NCM
         help
             Which USB communications class the device presents for the
             USB Ethernet link (192.168.7.1).
 
-            CDC-ECM is the modern default: in-box drivers on current
-            Windows 11, macOS and Linux. RNDIS is the legacy option for
-            old Windows 10 hosts — Microsoft has deprecated it and new
-            Windows builds are dropping the driver. (CDC-NCM would be
-            preferred over both, but CherryUSB has no NCM *device* class
-            as of v1.6.1 — revisit when it ships one.)
+            CDC-NCM is the default: it is the class Windows ships an
+            in-box driver for (UsbNcm.sys — Windows 11 24H2 removed the
+            legacy RNDIS driver), and macOS/Linux support it natively.
+            The device class implementation is WiCAN-authored (vendored
+            components/cherryusb fork; upstream CherryUSB has none).
 
-        config USBNET_CLASS_ECM
-            bool "CDC-ECM (Windows 11 / macOS / Linux in-box)"
-            select CHERRYUSB_DEVICE_CDC_ECM
-            select USBDEV_CDC_ECM_USING_LWIP
+            RNDIS remains for old Windows 10 hosts; CDC-ECM for
+            macOS/Linux-only deployments (Windows has NO in-box ECM
+            driver — bench-verified on Win11 26200).
+
+        config USBNET_CLASS_NCM
+            bool "CDC-NCM (Windows 11 / macOS / Linux in-box)"
 
         config USBNET_CLASS_RNDIS
-            bool "RNDIS (legacy Windows; deprecated by Microsoft)"
-            select CHERRYUSB_DEVICE_CDC_RNDIS
-            select USBDEV_RNDIS_USING_LWIP
+            bool "RNDIS (legacy Windows 10; removed in Windows 11 24H2)"
+
+        config USBNET_CLASS_ECM
+            bool "CDC-ECM (macOS / Linux; NOT Windows)"
 
     endchoice
 

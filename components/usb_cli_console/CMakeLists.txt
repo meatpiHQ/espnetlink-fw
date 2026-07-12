@@ -6,7 +6,7 @@ idf_component_register(
     INCLUDE_DIRS "include"
     # gps: passthrough auto-start reads the gps settings + stream hooks.
     # settings_manager/cmdline_manager: the {cli} descriptor + own commands.
-    REQUIRES cherry-embedded__cherryusb freertos console vfs esp_common gps
+    REQUIRES cherryusb freertos console vfs esp_common gps
              hw_config driver esp_hw_support settings_manager cmdline_manager
              espressif__cjson
     PRIV_REQUIRES app_update mbedtls

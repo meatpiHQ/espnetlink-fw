@@ -1,5 +1,5 @@
-## usb_cli_console: CherryUSB CDC-ACM device class.
+## usb_cli_console: CherryUSB CDC-ACM device class (cherryusb is VENDORED —
+## components/cherryusb, meatpiHQ fork — not a managed dependency).
 dependencies:
-  cherry-embedded/cherryusb: "^1.5.2~2"
   ## IDF v6 dropped the bundled `json` component; cJSON comes from the registry.
   espressif/cjson: "^1.7.18"

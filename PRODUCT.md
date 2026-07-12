@@ -12,7 +12,13 @@ hardware/toolchain facts the standard refers to generically.
 - **Flash:** 16 MB QIO/QOUT @ 80 MHz
 - **Peripherals:** Quectel BG95 LTE modem (UART, 3 Mbaud + HW flow control,
   PPPoS + CMUX), GNSS module (UART, NMEA + AGNSS/PAIR), ICM-42670 IMU (I2C),
-  USB-OTG in device mode (CherryUSB composite: RNDIS + CDC-ACM console),
+  USB-OTG in device mode (CherryUSB composite: USB Ethernet + CDC-ACM
+  console; the Ethernet class is a Kconfig choice — **CDC-NCM default**
+  (Windows 11 in-box UsbNcm.sys, native macOS/Linux; the device class is
+  WiCAN-authored, vendored components/cherryusb fork), RNDIS option for
+  legacy Windows 10, CDC-ECM option for macOS/Linux-only. Bench 2026-07-12
+  on Win11 26200: NCM binds in-box and passes iperf; ECM has NO in-box
+  driver; RNDIS still binds but 24H2 removed the driver upstream),
   USB mux (USB_SEL GPIOs: ESP / flash-UART / modem passthrough), XR21V1414
   quad UART bridge (channel A = UART0 boot console/flash @ COM-port)
 - Schematic: `espnetlink_sch_v160.pdf`
@@ -32,7 +38,8 @@ hardware/toolchain facts the standard refers to generically.
 
 ## Network identity
 
-- USB RNDIS: device = `192.168.7.1/24`, per-netif DHCP server, DNS proxy on
+- USB Ethernet (CDC-NCM default; RNDIS/ECM options): device = `192.168.7.1/24`,
+  per-netif DHCP server, DNS proxy on
   the device address, NAT to the LTE (PPPoS) upstream
 - WiFi AP (wifi_manager defaults): SSID `ESPNetLink_<MAC-tail>`, `192.168.80.1/24`
 - HTTP API on `:80` (http_server_manager): `/api/settings*` (api_http),

@@ -1,11 +1,4 @@
 dependencies:
-  cherry-embedded/cherryusb:
-    component_hash: b8b0db4ed23d32e01ec41138600fb014bcf060a34b541daba1fca6ed22a61dfc
-    dependencies: []
-    source:
-      registry_url: https://components.espressif.com/
-      type: service
-    version: 1.6.1
   espressif/cjson:
     component_hash: e788323270d90738662d66fffa910bfe1fba019bba087f01557e70c40485b469
     dependencies:
@@ -198,7 +191,6 @@ dependencies:
       type: service
     version: 1.22.2
 direct_dependencies:
-- cherry-embedded/cherryusb
 - espressif/cjson
 - espressif/esp_modem
 - espressif/esp_tinyusb
@@ -212,6 +204,6 @@ direct_dependencies:
 - idf
 - igrr/libnmea
 - joltwallet/littlefs
-manifest_hash: afbea3b914028cba1bb24e63ec04ab5a73402beea5f2562ebbadced88b42534b
+manifest_hash: 8a9573e4d1466345bf603ec0e5c4c21c5a14609994922ccbb32cd237c4829d4d
 target: esp32s3
 version: 3.0.0

@@ -1,3 +1,4 @@
-## usb_dev_ethernet: CherryUSB RNDIS device.
-dependencies:
-  cherry-embedded/cherryusb: "^1.5.2~2"
+## usb_dev_ethernet: CherryUSB USB-Ethernet device (NCM/RNDIS/ECM — the
+## cherryusb component is VENDORED at components/cherryusb, meatpiHQ fork
+## carrying the WiCAN-authored device-side CDC-NCM class).
+dependencies: {}

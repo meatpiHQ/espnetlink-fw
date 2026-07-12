@@ -14,13 +14,16 @@ bool usbnet_usb_get_console_enabled(void);
 
 void usbnet_usb_start(void);
 
-// Blocks until the previous RNDIS IN transfer completes (best-effort).
+// Blocks until the previous USB IN transfer completes (best-effort).
 // Intended for lwIP linkoutput backpressure handling.
 bool usbnet_usb_wait_tx_done(TickType_t ticks);
 
-// CherryUSB callbacks (implemented by this component)
-void usbd_rndis_data_recv_done(uint32_t len);
-void usbd_rndis_data_send_done(uint32_t len);
+// ISR-safe notifications from the class data callbacks (any class):
+// wake the rx drain task / release the tx-done semaphore / drive the
+// link state machine (NCM's host-controlled alt-setting link).
+void usbnet_usb_notify_rx(void);
+void usbnet_usb_notify_tx_done(void);
+void usbnet_usb_notify_link(bool up);
 
 #ifdef __cplusplus
 }

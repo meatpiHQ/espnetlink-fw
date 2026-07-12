@@ -144,7 +144,16 @@ behavior is bench-verified today; on-target pytest apps are the backlog.
 - Ported `*_cli.c` internal `OK` trailers stripped — on this product the
   CDC console owns the OK/ERROR trailer (legacy parity contract).
 - mDNS: `_meatpi._tcp` only (no `_wican._tcp`); esp-mdns rides the WiFi
-  netifs — the raw-lwip RNDIS link carries no mDNS by design.
+  netifs — the raw-lwip USB Ethernet link carries no mDNS by design.
+- USB Ethernet class is a Kconfig choice (`USBNET_CLASS`, 2026-07-12):
+  **CDC-NCM default** — cherryusb is now VENDORED (components/cherryusb,
+  meatpiHQ fork carrying the WiCAN-authored device-side NCM class; no
+  upstream CherryUSB version has one). Bench on Win11 26200: NCM binds
+  the in-box UsbNcm.sys and passes iperf (2.87/3.74 Mbit/s — RX faster
+  than RNDIS); ECM has NO in-box Windows driver (error 28, macOS/Linux
+  option only); RNDIS still binds here but Win11 24H2 removed the driver
+  upstream (legacy-Win10 option). usbnet_ncm.c adapts the class's
+  NTB-level APIs to the raw-lwip pbuf contract.
 - Identity Kconfig (`CONFIG_WICAN_DEVICE_TYPE`= espnetlink etc.) keeps the
   WICAN_* symbol names for cross-component source compatibility.
 
