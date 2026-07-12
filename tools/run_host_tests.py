@@ -64,15 +64,25 @@ fail=0
 for suite in {' '.join(suites)}; do
     name=$(basename $(dirname "$suite"))
     log={LOG_DIR}/$name.log
-    (
-        cd "$suite" &&
-        idf.py --preview set-target linux &&
-        idf.py build &&
-        elf=$(ls build/*.elf) &&
-        echo "running $elf" &&
-        "$elf"
-    ) >"/work/$log" 2>&1
-    if [ $? -eq 0 ]; then
+    ok=0
+    # two attempts: the Windows-mounted volume throws transient
+    # "Permission denied" file locks at cmake/ninja now and then
+    for attempt in 1 2; do
+        (
+            cd "$suite" &&
+            idf.py --preview set-target linux &&
+            idf.py build &&
+            elf=$(ls build/*.elf) &&
+            echo "running $elf" &&
+            "$elf"
+        ) >"/work/$log" 2>&1
+        if [ $? -eq 0 ]; then
+            ok=1
+            break
+        fi
+        [ $attempt -eq 1 ] && echo "SUITE RETRY $suite"
+    done
+    if [ $ok -eq 1 ]; then
         echo "SUITE PASS $suite"
     else
         echo "SUITE FAIL $suite (log: $log)"
