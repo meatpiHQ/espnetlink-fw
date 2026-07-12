@@ -104,14 +104,23 @@ def put_vpn(mutate):
 
 def teardown(ts_dir):
     print("teardown...")
+    # retry: teardown often lands while the DUT httpd is still starved
+    # from tunnel load; giving up here leaves the DUT in tailscale mode
+    # pointing at a dead headscale
+    for attempt in range(4):
+        try:
+            put_vpn(lambda c: c.update({"enabled": False,
+                                        "type": "wireguard",
+                                        "ts_auth_key": "",
+                                        "ts_control_url": ""}))
+            break
+        except Exception as e:
+            print(f"(dut teardown settings, try {attempt + 1}: {e})")
+            time.sleep(5)
     try:
-        put_vpn(lambda c: c.update({"enabled": False,
-                                    "type": "wireguard",
-                                    "ts_auth_key": "",
-                                    "ts_control_url": ""}))
         api("/api/restart", "POST", {})
     except Exception as e:
-        print(f"(dut teardown: {e})")
+        print(f"(dut teardown restart: {e})")
     if ts_dir:
         pi(f"cd {ts_dir} && sudo -n ./tailscale --socket=/tmp/tsb.sock down"
            " 2>/dev/null; sudo -n pkill -f 'tailscaled.*tsb.sock'")
@@ -147,10 +156,24 @@ def main():
     pi("sudo -n sed -i 's|^server_url:.*|server_url: "
        f"http://{ctrl_host}:8080|' /etc/headscale/config.yaml")
     pi("sudo -n pkill -x headscale; sleep 1")
+    # hermetic run: drop accumulated node state (every previous run left a
+    # registered pi-bench-* node behind; a netmap full of stale "online"
+    # peers makes the DUT engine disco/DERP-probe all of them, which is
+    # enough extra load to wedge its HTTP server). Keys are kept — only
+    # the node/user db is rebuilt. VERIFIED: a pi() transport hiccup can
+    # swallow a command, and serving stale state invalidates the run.
+    r = pi("sudo -n rm -f /var/lib/headscale/db.sqlite* && echo WIPED")
+    if "WIPED" not in r.stdout:
+        raise SystemExit("FAIL: headscale state wipe did not run: "
+                         + (r.stderr or r.stdout).strip())
     pi("sudo -n sh -c 'nohup /tmp/headscale serve > /tmp/hs_bench.log "
        "2>&1 &'")
     time.sleep(4)
     check("headscale serving", bool(pi("pgrep -x headscale").stdout.strip()))
+    stale = pi("sudo -n /tmp/headscale nodes list 2>/dev/null | "
+               "grep -c -e espnetlink -e pi-bench").stdout.strip()
+    check("headscale state fresh", stale in ("", "0"),
+          f"stale nodes: {stale}")
     pi("sudo -n /tmp/headscale users create espnetlink 2>/dev/null")
     r = pi("sudo -n /tmp/headscale preauthkeys create --user espnetlink "
            f"--reusable --expiration 4h 2>/dev/null | tail -1 > {KEYFILE}"
@@ -168,8 +191,10 @@ def main():
         time.sleep(8)
         wait_online()
 
-        # 3. CONNECTED + tailnet IP (LTE attach + register: generous budget)
-        end = time.time() + 180
+        # 3. CONNECTED + tailnet IP. Budget covers the WORST observed LTE
+        # reattach after a reboot (CGNAT slow-reconnect), not the typical
+        # ~60 s — a short window here fails runs the product would survive.
+        end = time.time() + 480
         v = {}
         while time.time() < end:
             try:
@@ -210,19 +235,26 @@ def main():
             p = pi(f"ping -c 10 -i 0.5 -q {dut_ip}", timeout=60)
             check("ICMP through the tunnel", " 0% packet loss" in p.stdout,
                   p.stdout.strip().splitlines()[-1] if p.stdout else "")
-            h = pi(f"curl -s -m 15 -o /dev/null -w '%{{http_code}}' "
-                   f"http://{dut_ip}/api/status", timeout=30)
-            check("HTTP through the tunnel", h.stdout.strip() == "200",
-                  f"code={h.stdout.strip()}")
-            # peer visible from the DUT side (retry: the RNDIS HTTP server
-            # can RST a keep-alive socket under tunnel load)
+            # retry: right after the ping burst the DUT httpd can be
+            # starved of sockets for tens of seconds (tunnel + USB load)
+            # and drops connections until the burst drains
+            code = ""
+            for _ in range(4):
+                h = pi(f"curl -s -m 15 -o /dev/null -w '%{{http_code}}' "
+                       f"http://{dut_ip}/api/status", timeout=30)
+                code = h.stdout.strip()
+                if code == "200":
+                    break
+                time.sleep(5)
+            check("HTTP through the tunnel", code == "200", f"code={code}")
+            # peer visible from the DUT side (same socket-starvation window)
             v2 = {}
-            for _ in range(3):
+            for _ in range(6):
                 try:
                     v2 = api("/api/vpn")
                     break
                 except Exception:
-                    time.sleep(2)
+                    time.sleep(4)
             check("DUT sees the peer", v2.get("ts_peers", 0) >= 1,
                   f"ts_peers={v2.get('ts_peers')}")
             # peer detail surface: hostname/ip/online/path per peer
