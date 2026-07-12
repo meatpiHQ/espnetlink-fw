@@ -485,17 +485,48 @@ static esp_err_t verify_epoc_status(void)
             int enabled = -1;
             unsigned constellation = 0;
             sscanf(line + 9, "%d,%x", &enabled, &constellation);
-            ESP_LOGI(TAG, "EPOC: enabled=%d constellation=0x%x",
-                     enabled, constellation);
+
+            /* desired PAIR498 mask from the `epoc_constellation` setting
+             * (1 GPS, 3 GPS+Galileo [default], 5 GPS+BDS) */
+            int desired = gps_settings_is_configured()
+                              ? gps_settings()->epoc_constellation : 3;
+
+            ESP_LOGI(TAG, "EPOC: enabled=%d constellation=0x%x (want 0x%x)",
+                     enabled, constellation, (unsigned)desired);
+            agnss_pair_lock_give();
+
+            if ((int)constellation != desired)
+            {
+                char ccmd[32];
+                char body[16];
+                snprintf(body, sizeof(body), "PAIR498,%d", desired);
+                agnss_build_pair_cmd(ccmd, sizeof(ccmd), body);
+
+                esp_err_t cerr = pair_send_and_wait_ack(498, ccmd, 2000);
+                if (cerr != ESP_OK)
+                {
+                    return cerr;
+                }
+                ESP_LOGI(TAG, "EPOC constellation set to 0x%x",
+                         (unsigned)desired);
+
+                /* persist across module power cycles (app note §3.4.3);
+                 * best-effort — prediction still runs this session */
+                char scmd[32];
+                agnss_build_pair_cmd(scmd, sizeof(scmd), "PAIR513");
+                if (pair_send_and_wait_ack(513, scmd, 2000) != ESP_OK)
+                {
+                    ESP_LOGW(TAG, "PAIR513 settings save not acknowledged");
+                }
+            }
+
             if (enabled != 1)
             {
                 ESP_LOGW(TAG, "EPOC not enabled – enabling now");
                 char ecmd[32];
                 agnss_build_pair_cmd(ecmd, sizeof(ecmd), "PAIR496,1");
-                agnss_pair_lock_give();
                 return pair_send_and_wait_ack(496, ecmd, 2000);
             }
-            agnss_pair_lock_give();
             return ESP_OK;
         }
     }

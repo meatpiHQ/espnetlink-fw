@@ -57,7 +57,46 @@ void test_defaults_applied_and_cli_registered(void)
     TEST_ASSERT_TRUE(cfg->agnss_enabled);
     TEST_ASSERT_EQUAL(120, cfg->agnss_cache_s);
     TEST_ASSERT_TRUE(cfg->cli);
+    TEST_ASSERT_EQUAL(3, cfg->epoc_constellation); /* gps_galileo default */
     TEST_ASSERT_EQUAL(2, s_cli_registrations);
+}
+
+/* epoc_constellation is a closed enum (gps|gps_galileo|gps_bds): schema
+ * validation rejects anything else; each valid choice maps onto the
+ * PAIR498 mask (1/3/5) on apply. */
+void test_epoc_constellation_enum(void)
+{
+    fixture_reset();
+    TEST_ASSERT_EQUAL(ESP_OK, settings_manager_start());
+
+    cJSON *obj = NULL;
+    char errbuf[96] = "";
+
+    TEST_ASSERT_EQUAL(ESP_OK, settings_manager_get("gps", &obj));
+    cJSON_DeleteItemFromObjectCaseSensitive(obj, "epoc_constellation");
+    cJSON_AddStringToObject(obj, "epoc_constellation", "glonass");
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, settings_manager_set("gps", obj, errbuf,
+                                                       sizeof(errbuf), NULL));
+    cJSON_Delete(obj);
+
+    obj = NULL;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_manager_get("gps", &obj));
+    cJSON_DeleteItemFromObjectCaseSensitive(obj, "epoc_constellation");
+    cJSON_AddStringToObject(obj, "epoc_constellation", "gps_bds");
+    TEST_ASSERT_EQUAL(ESP_OK, settings_manager_set("gps", obj, errbuf,
+                                                   sizeof(errbuf), NULL));
+    cJSON_Delete(obj);
+
+    /* reboot-to-apply: mask changes only on the next boot pass */
+    TEST_ASSERT_EQUAL(3, gps_settings()->epoc_constellation);
+
+    /* simulated reboot: stop -> init -> register -> start */
+    settings_manager_stop();
+    TEST_ASSERT_EQUAL(ESP_OK, settings_manager_init());
+    TEST_ASSERT_EQUAL(ESP_OK, gps_register_settings());
+    TEST_ASSERT_EQUAL(ESP_OK, settings_manager_start());
+
+    TEST_ASSERT_EQUAL(5, gps_settings()->epoc_constellation);
 }
 
 /* agnss_cache_s carries a 10..86400 range: out-of-range persists are
@@ -128,6 +167,7 @@ void app_main(void)
 
     RUN_TEST(test_defaults_applied_and_cli_registered);
     RUN_TEST(test_cache_interval_range_enforced);
+    RUN_TEST(test_epoc_constellation_enum);
     RUN_TEST(test_persist_is_reboot_to_apply);
     RUN_TEST(test_cli_gate_off_after_reboot);
 

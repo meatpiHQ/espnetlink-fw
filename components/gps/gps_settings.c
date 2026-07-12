@@ -25,6 +25,10 @@ static const settings_field_t FIELDS[] =
     SETTINGS_BOOL("agnss_enabled", true),  /* legacy AGNSS_ENABLED */
     SETTINGS_INT ("agnss_cache_s", 10, 86400, 120), /* AGNSS_CACHE_S */
     SETTINGS_BOOL("cli",           true),
+    /* EPOC orbit-prediction constellations (Quectel AGNSS app note §2.5:
+     * only these three configs exist). Applied via $PAIR498 at AGNSS init. */
+    SETTINGS_STR_ENUM("epoc_constellation", "gps,gps_galileo,gps_bds",
+                      "gps_galileo"),
 };
 
 static gps_settings_t s_cfg;
@@ -47,6 +51,23 @@ static bool get_bool(const cJSON *obj, const char *key, bool fallback)
     return cJSON_IsBool(item) ? cJSON_IsTrue(item) : fallback;
 }
 
+static int epoc_constellation_mask(const cJSON *obj)
+{
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj,
+                                                         "epoc_constellation");
+    const char *s = cJSON_IsString(item) ? item->valuestring : "";
+
+    if (strcmp(s, "gps") == 0)
+    {
+        return 1;
+    }
+    if (strcmp(s, "gps_bds") == 0)
+    {
+        return 5; /* bit 0 GPS + bit 2 BDS */
+    }
+    return 3;     /* default gps_galileo: bit 0 GPS + bit 1 Galileo */
+}
+
 static esp_err_t on_apply(const cJSON *settings)
 {
     const cJSON *cache = cJSON_GetObjectItemCaseSensitive(settings,
@@ -59,6 +80,7 @@ static esp_err_t on_apply(const cJSON *settings)
     s_cfg.agnss_cache_s = cJSON_IsNumber(cache) ? (int)cache->valuedouble
                                                 : 120;
     s_cfg.cli           = get_bool(settings, "cli", true);
+    s_cfg.epoc_constellation = epoc_constellation_mask(settings);
     s_configured        = true;
 
     /* §6b: the component registers its own console commands on the boot

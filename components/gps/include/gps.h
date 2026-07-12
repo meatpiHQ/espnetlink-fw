@@ -117,6 +117,9 @@ typedef struct
     bool agnss_enabled; /* legacy AGNSS_ENABLED                            */
     int  agnss_cache_s; /* legacy AGNSS_CACHE_S — position cache interval  */
     bool cli;           /* §6b gate for this component's console commands  */
+    int  epoc_constellation; /* PAIR498 mask from "epoc_constellation":
+                                1=GPS, 3=GPS+Galileo, 5=GPS+BDS (the only
+                                configs the LC76G EPOC supports)            */
 } gps_settings_t;
 
 /** Register the "gps" settings descriptor. Called by main between

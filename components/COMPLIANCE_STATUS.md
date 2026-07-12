@@ -156,11 +156,14 @@ behavior is bench-verified today; on-target pytest apps are the backlog.
 - `api_http` delayed reboot uses esp_restart() (restart_tracker not ported yet).
 - AGNSS: this LC76G firmware build carries **EPOC, not EASY** (Quectel
   AGNSS app note: one build has one of the two; PAIR491 → `$PAIR001,491,3`
-  = unsupported). agnss.c probes EASY → falls through to EPOC (PAIR508) —
-  bench module reports `EPOC enabled=1 constellation=0x1` (GPS-only
-  prediction). PAIR511 nav-data saves are shared by both. Future option:
-  Host EPO over LTE (the module requests it via `$PAIR010,0,<gnss>`;
-  needs a Quectel `vendorinfo` download credential).
+  = unsupported). agnss.c probes EASY → falls through to EPOC (PAIR508).
+  EPOC prediction constellations are user-selectable via the gps
+  `epoc_constellation` setting (`gps|gps_galileo|gps_bds`, default
+  **gps_galileo**) — applied via PAIR498 + persisted in module NVRAM via
+  PAIR513; hardware-verified 2026-07-12 incl. persistence across reset.
+  PAIR511 nav-data saves are shared by both. Future option: Host EPO over
+  LTE (the module requests it via `$PAIR010,0,<gnss>`; needs a Quectel
+  `vendorinfo` download credential — secret setting, never in source).
 - Boot log default changed from silent (`esp_log_level_set("*", NONE)`) to
   INFO via log_manager settings — `debug 0/1` CLI still toggles globally, and
   `PUT /api/settings/log_manager {"level":"none"}` restores silence persistently.
