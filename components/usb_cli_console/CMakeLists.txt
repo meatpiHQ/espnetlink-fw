@@ -8,6 +8,6 @@ idf_component_register(
     # settings_manager/cmdline_manager: the {cli} descriptor + own commands.
     REQUIRES cherry-embedded__cherryusb freertos console vfs esp_common gps
              hw_config driver esp_hw_support settings_manager cmdline_manager
-             json
+             espressif__cjson
     PRIV_REQUIRES app_update mbedtls
 )

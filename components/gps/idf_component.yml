@@ -1,3 +1,5 @@
 ## gps: NMEA parsing via igrr/libnmea.
 dependencies:
   igrr/libnmea: "^0.2.1"
+  ## IDF v6 dropped the bundled `json` component; cJSON comes from the registry.
+  espressif/cjson: "^1.7.18"

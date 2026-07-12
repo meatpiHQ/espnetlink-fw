@@ -12,7 +12,8 @@ idf_component_register(
              dev_status_manager wifi_manager api_http restart_tracker
              ota_manager ha_webhooks mdns_manager web_ui http_client_manager
              esp_netif esp_event
-             console json esp_http_client esp-tls lwip esp_timer driver
+             console espressif__cjson esp_http_client esp-tls lwip esp_timer
+             esp_driver_gpio esp_driver_uart
              esp_hw_support
 )
 

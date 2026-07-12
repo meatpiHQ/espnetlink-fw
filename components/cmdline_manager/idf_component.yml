@@ -1,4 +1,7 @@
 ## Managed component dependencies for cmdline_manager.
-## cJSON comes from the IDF v5.5 bundled `json` component (PRIV_REQUIRES in
-## CMakeLists); the espressif/cjson managed component is IDF v6 only.
-dependencies: {}
+## cJSON comes from the espressif/cjson managed component (IDF v6 dropped
+## the bundled `json` component); PRIV_REQUIRES in CMakeLists.
+dependencies:
+  espressif/cjson:
+    version: "^1.7.18"
+    require: private

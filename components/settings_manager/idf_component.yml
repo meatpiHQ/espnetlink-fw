@@ -1,7 +1,7 @@
 ## Managed component dependencies for settings_manager.
 ## LittleFS is the filesystem the Settings Manager owns (see ARCHITECTURE.md §5).
-## cJSON comes from the IDF v5.5 bundled `json` component (declared as a
-## public REQUIRES in CMakeLists) — the espressif/cjson managed component is
-## only needed from IDF v6 on.
+## cJSON comes from the espressif/cjson managed component (IDF v6 dropped
+## the bundled `json` component); declared as a public REQUIRES in CMakeLists.
 dependencies:
   joltwallet/littlefs: "^1.14.0"
+  espressif/cjson: "^1.7.18"

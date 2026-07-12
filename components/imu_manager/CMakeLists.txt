@@ -17,9 +17,9 @@ idf_component_register(
     # event_manager dropped in the espnetlink port: imu_manager_events.c
     # is kept on disk but excluded from SRCS (its call sites in
     # imu_manager.c are no-ops — same pattern as dev_status_manager).
-    # hw_config + driver: the ESPNetLink WoM deep-sleep extension
+    # hw_config + esp_driver_gpio: the ESPNetLink WoM deep-sleep extension
     # (imu_manager_wom.c) reads IMU_INT_PIN via gpio before EXT0 arm.
     PRIV_REQUIRES i2c_bus esp_driver_i2c esp_timer http_server_manager
                   dev_status_manager settings_manager log_manager
-                  cmdline_manager hw_config driver
+                  cmdline_manager hw_config esp_driver_gpio
 )

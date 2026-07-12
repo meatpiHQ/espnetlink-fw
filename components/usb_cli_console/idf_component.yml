@@ -1,3 +1,5 @@
 ## usb_cli_console: CherryUSB CDC-ACM device class.
 dependencies:
   cherry-embedded/cherryusb: "^1.5.2~2"
+  ## IDF v6 dropped the bundled `json` component; cJSON comes from the registry.
+  espressif/cjson: "^1.7.18"

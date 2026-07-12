@@ -8,10 +8,10 @@ idf_component_register(
          "settings_manager_storage.c"
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "."
-    # cJSON is a public dependency (the header exposes its types); on IDF
-    # v5.5 it comes from the bundled `json` component (IDF v6 switches to the
-    # espressif/cjson managed component per the standard's v6 note).
+    # cJSON is a public dependency (the header exposes its types); IDF v6
+    # dropped the bundled `json` component, so it comes from the
+    # espressif/cjson managed component (see idf_component.yml).
     # littlefs is only used by the .c files -> keep it private (shallow graph).
-    REQUIRES json
+    REQUIRES espressif__cjson
     PRIV_REQUIRES joltwallet__littlefs
 )

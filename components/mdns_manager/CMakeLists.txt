@@ -8,8 +8,8 @@ idf_component_register(
     # _meatpi._tcp:80, espnetlink_<id> hostname, device_type/device_id/
     # mac/fw/api TXT). esp-mdns is a MANAGED component (see
     # idf_component.yml).
-    # json (bundled cJSON on IDF v5.5) is used by mdns_manager_settings.c's
-    # on_apply; the espressif/cjson managed component is IDF v6 only.
+    # cJSON (espressif/cjson managed component; IDF v6 dropped the bundled
+    # `json` component) is used by mdns_manager_settings.c's on_apply.
     PRIV_REQUIRES espressif__mdns dev_status_manager settings_manager
-                  log_manager json
+                  log_manager espressif__cjson
 )

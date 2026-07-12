@@ -17,10 +17,8 @@
 #include "microlink_internal.h"
 #include "esp_log.h"
 #include "esp_random.h"
-/* espnetlink/IDF v5.5 (mbedtls 3.x): classic public headers — the
- * mbedtls/private/ paths are a WiCAN/IDF v6 (mbedtls 4) adaptation. */
-#include "mbedtls/chacha20.h"
-#include "mbedtls/chachapoly.h"
+#include "mbedtls/private/chacha20.h"
+#include "mbedtls/private/chachapoly.h"
 #include <string.h>
 
 static const char *TAG = "ml_noise";

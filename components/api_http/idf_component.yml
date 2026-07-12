@@ -1,3 +1,6 @@
-## api_http has no managed dependencies (cJSON comes from the IDF v5.5
-## bundled `json` component; see CMakeLists).
-dependencies: {}
+## cJSON comes from the espressif/cjson managed component (IDF v6 dropped
+## the bundled `json` component); PRIV_REQUIRES in CMakeLists.
+dependencies:
+  espressif/cjson:
+    version: "^1.7.18"
+    require: private

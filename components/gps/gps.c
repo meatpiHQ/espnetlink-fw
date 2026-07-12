@@ -17,7 +17,9 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
-#include "soc/uart_channel.h"
+/* IDF v6 removed soc/uart_channel.h; the UART0 default-pin macros live in
+ * soc/uart_pins.h (U0TXD_GPIO_NUM/U0RXD_GPIO_NUM). */
+#include "soc/uart_pins.h"
 
 #include "hw_config.h"
 #include "gps_internal.h"
@@ -112,8 +114,8 @@ esp_err_t gps_uart0_prepare(void)
     }
 
     err = uart_set_pin(UART_NUM_0,
-                       UART_NUM_0_TXD_DIRECT_GPIO_NUM,
-                       UART_NUM_0_RXD_DIRECT_GPIO_NUM,
+                       U0TXD_GPIO_NUM,
+                       U0RXD_GPIO_NUM,
                        UART_PIN_NO_CHANGE,
                        UART_PIN_NO_CHANGE);
     if (err != ESP_OK)

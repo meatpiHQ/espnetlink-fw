@@ -1,2 +1,6 @@
 dependencies:
   espressif/mdns: "^1.8.0"
+  ## IDF v6 dropped the bundled `json` component; cJSON comes from the registry.
+  espressif/cjson:
+    version: "^1.7.18"
+    require: private

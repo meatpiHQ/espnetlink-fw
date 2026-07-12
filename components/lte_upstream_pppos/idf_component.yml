@@ -2,3 +2,5 @@
 dependencies:
   espressif/esp_modem: "^2.0.0"
   espressif/usb_host_cdc_acm: "^2"
+  ## IDF v6 dropped the bundled `json` component; cJSON comes from the registry.
+  espressif/cjson: "^1.7.18"

@@ -8,9 +8,10 @@ idf_component_register(
          "lte_upstream_pppos_http.c"
     INCLUDE_DIRS "include"
     REQUIRES esp_netif esp_event freertos modem_manager esp_modem usb_dev_ethernet console
-             espressif__usb_host_cdc_acm json settings_manager cmdline_manager
-    PRIV_REQUIRES driver hw_config usb http_server_manager esp_http_server
-                  dev_status_manager
+             espressif__usb_host_cdc_acm espressif__cjson settings_manager cmdline_manager
+    # esp_ringbuf: IDF v6 no longer pulls freertos/ringbuf.h in via freertos.
+    PRIV_REQUIRES esp_driver_gpio hw_config usb http_server_manager esp_http_server
+                  dev_status_manager esp_ringbuf
 )
 
 # C++17 required by lte_upstream_pppos_usb.cpp (and by esp_modem headers)

@@ -26,25 +26,28 @@ set(REQUIRES
     esp_timer
     lwip
     mbedtls
-    # espnetlink/IDF v5.5: cJSON from the bundled `json` component
-    # (upstream microlink's original dep; WiCAN/IDF v6 uses the
-    # espressif__cjson managed component instead).
-    json
+    # cJSON from the espressif/cjson managed component (IDF v6 dropped the
+    # bundled `json` component; see idf_component.yml), matching WiCAN v6.
+    espressif__cjson
     esp_driver_uart
     esp_driver_gpio
     esp_http_server
 )
 
-# espnetlink/IDF v5.5 (mbedtls 3.x): entropy/ctr_drbg/chacha20/chachapoly
-# headers are public — the WiCAN/IDF v6 (mbedtls 4 / TF-PSA-Crypto)
-# private-include-dir hack is dropped; ml_noise.c includes the classic
-# mbedtls/ paths again (see PROVENANCE.md, ESPNetLink port section).
+# IDF v6: mbedtls 4 (TF-PSA-Crypto) moved entropy/ctr_drbg/chacha20/
+# chachapoly to mbedtls/private/. Add the builtin private include dir so
+# microlink's classic-mbedtls TLS/crypto (byte-unchanged) resolves them
+# (matches WiCAN v6; see PROVENANCE.md, ESPNetLink port section).
+idf_build_get_property(idf_path IDF_PATH)
+set(_ml_mbedtls_priv
+    "${idf_path}/components/mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/include")
 
 idf_component_register(
     SRCS ${SRCS}
     INCLUDE_DIRS
         "include"
         "src"
+        "${_ml_mbedtls_priv}"
     REQUIRES ${REQUIRES}
     PRIV_REQUIRES
         wireguard_lwip

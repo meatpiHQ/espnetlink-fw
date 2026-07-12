@@ -11,5 +11,5 @@ idf_component_register(
     # (<comp>_register_cli(), wired by main). console is PUBLIC: the
     # register API takes esp_console_cmd_t.
     REQUIRES console
-    PRIV_REQUIRES settings_manager log_manager esp_driver_uart json
+    PRIV_REQUIRES settings_manager log_manager esp_driver_uart espressif__cjson
 )

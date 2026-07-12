@@ -27,9 +27,6 @@
 #include "lwip/netdb.h"
 #include "mbedtls/net_sockets.h"
 #include "mbedtls/error.h"
-/* espnetlink/IDF v5.5 (mbedtls 3.6): mbedtls_psa_get_random bridges the
- * PSA RNG into mbedtls_ssl_conf_rng (mandatory on mbedtls 3.x). */
-#include "mbedtls/psa_util.h"
 #include "nacl_box.h"
 #include <string.h>
 #include <errno.h>
@@ -758,12 +755,6 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
                                  MBEDTLS_SSL_IS_CLIENT,
                                  MBEDTLS_SSL_TRANSPORT_STREAM,
                                  MBEDTLS_SSL_PRESET_DEFAULT);
-    /* espnetlink/IDF v5.5 (mbedtls 3.6): an explicit f_rng is still
-     * mandatory (mbedtls_ssl_setup fails with MBEDTLS_ERR_SSL_NO_RNG
-     * otherwise) — bridge the PSA RNG in. mbedtls 4 (WiCAN/IDF v6) uses
-     * the PSA RNG implicitly and removed mbedtls_ssl_conf_rng. */
-    mbedtls_ssl_conf_rng(&ml->derp.ssl_conf, mbedtls_psa_get_random,
-                         MBEDTLS_PSA_RANDOM_STATE);
     mbedtls_ssl_conf_authmode(&ml->derp.ssl_conf, MBEDTLS_SSL_VERIFY_NONE);
     mbedtls_ssl_conf_read_timeout(&ml->derp.ssl_conf, DERP_CONNECT_TIMEOUT_MS);
 

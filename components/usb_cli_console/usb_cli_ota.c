@@ -27,7 +27,9 @@
 #include "freertos/stream_buffer.h"
 #include "freertos/task.h"
 
-#include "mbedtls/sha256.h"
+/* IDF v6 (mbedtls 4 / TF-PSA-Crypto): the legacy mbedtls_sha256_* API is
+ * gone; hash via the PSA crypto API instead. */
+#include "psa/crypto.h"
 
 #include "usb_cli_console_internal.h"
 
@@ -172,9 +174,14 @@ static int usb_cli_cmd_ota(int argc, char **argv)
         return 1;
     }
 
-    mbedtls_sha256_context sha;
-    mbedtls_sha256_init(&sha);
-    mbedtls_sha256_starts(&sha, 0);
+    psa_hash_operation_t sha = PSA_HASH_OPERATION_INIT;
+    psa_crypto_init();
+    if (psa_hash_setup(&sha, PSA_ALG_SHA_256) != PSA_SUCCESS)
+    {
+        printf("OTA ERR sha init\n");
+        esp_ota_abort(handle);
+        return 1;
+    }
 
     usb_cli_console_set_raw_rx(usb_cli_ota_raw_rx);
     printf("OTA READY\n");
@@ -213,7 +220,7 @@ static int usb_cli_cmd_ota(int argc, char **argv)
         }
         idle_ms = 0;
 
-        mbedtls_sha256_update(&sha, s_chunk, got);
+        psa_hash_update(&sha, s_chunk, got);
 
         err = esp_ota_write(handle, s_chunk, got);
         if (err != ESP_OK)
@@ -243,9 +250,14 @@ static int usb_cli_cmd_ota(int argc, char **argv)
 
     usb_cli_console_set_raw_rx(NULL);
 
-    uint8_t actual_sha[32];
-    mbedtls_sha256_finish(&sha, actual_sha);
-    mbedtls_sha256_free(&sha);
+    uint8_t actual_sha[32] = {0};
+    size_t actual_sha_len = 0;
+    if (psa_hash_finish(&sha, actual_sha, sizeof(actual_sha),
+                        &actual_sha_len) != PSA_SUCCESS)
+    {
+        psa_hash_abort(&sha);
+        failed = true;
+    }
 
     if (failed)
     {
