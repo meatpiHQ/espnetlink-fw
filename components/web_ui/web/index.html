@@ -1,32 +1,1375 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#1a3266">
+<meta name="theme-color" content="#24478f">
 <title>ESPNetLink</title>
-<link rel="stylesheet" href="app.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='10' fill='%2324478f'/><text x='12' y='16' font-size='11' text-anchor='middle' fill='white' font-family='sans-serif'>E</text></svg>">
+<style>
+/* ================= 1. TOKENS (WiCAN Pro design, 2026-07-10) ================= */
+:root{
+  --bg:#e9edf2; --surface:#ffffff; --surface-2:#f3f6f9; --surface-3:#eaeef3;
+  --border:#dce2ea; --border-strong:#c6cfdb;
+  --text:#182230; --text-2:#586472; --text-3:#8a95a4;
+  --primary:#24478f; --primary-2:#1a3266; --primary-tint:#e9f0fb; --on-primary:#ffffff;
+  --success:#0e8a5f; --success-tint:#e3f5ec;
+  --danger:#d23b3b; --danger-tint:#fbe9e9;
+  --warning:#c07a00; --warning-tint:#fbf0d9;
+  --accent:#0d7fa6;
+  --logo-text:#24478f;
+  --term-bg:#10151d; --term-text:#37d98a; --term-dim:#4f6b5d;
+  --focus:rgba(36,71,143,.18);
+  --shadow:0 1px 2px rgba(20,30,50,.05),0 6px 20px rgba(20,30,50,.06);
+  --shadow-lg:0 10px 30px -12px rgba(20,30,50,.45);
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --ui:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme]){
+  --bg:#0b0e13; --surface:#141922; --surface-2:#1b222d; --surface-3:#212a36;
+  --border:#28313d; --border-strong:#3a4756; --text:#e7eef6; --text-2:#9aa7b6; --text-3:#697687;
+  --primary:#5b8fe0; --primary-2:#77a4ea; --primary-tint:#16233a; --on-primary:#0a0f16;
+  --success:#37d98a; --success-tint:#112a20;
+  --danger:#f2686b; --danger-tint:#2f1618;
+  --warning:#e0a955; --warning-tint:#2a2010;
+  --accent:#3fb6dd;
+  --logo-text:#a9c2ec;
+  --term-bg:#080b10; --term-text:#37d98a; --term-dim:#3a5748;
+  --focus:rgba(91,143,224,.28);
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.35);
+  --shadow-lg:0 12px 34px -12px rgba(0,0,0,.6);
+  color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0b0e13; --surface:#141922; --surface-2:#1b222d; --surface-3:#212a36;
+  --border:#28313d; --border-strong:#3a4756; --text:#e7eef6; --text-2:#9aa7b6; --text-3:#697687;
+  --primary:#5b8fe0; --primary-2:#77a4ea; --primary-tint:#16233a; --on-primary:#0a0f16;
+  --success:#37d98a; --success-tint:#112a20;
+  --danger:#f2686b; --danger-tint:#2f1618;
+  --warning:#e0a955; --warning-tint:#2a2010;
+  --accent:#3fb6dd;
+  --logo-text:#a9c2ec;
+  --term-bg:#080b10; --term-text:#37d98a; --term-dim:#3a5748;
+  --focus:rgba(91,143,224,.28);
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.35);
+  --shadow-lg:0 12px 34px -12px rgba(0,0,0,.6);
+  color-scheme:dark;
+}
+:root[data-theme="light"]{
+  --bg:#e9edf2; --surface:#ffffff; --surface-2:#f3f6f9; --surface-3:#eaeef3;
+  --border:#dce2ea; --border-strong:#c6cfdb;
+  --text:#182230; --text-2:#586472; --text-3:#8a95a4;
+  --primary:#24478f; --primary-2:#1a3266; --primary-tint:#e9f0fb; --on-primary:#ffffff;
+  --success:#0e8a5f; --success-tint:#e3f5ec;
+  --danger:#d23b3b; --danger-tint:#fbe9e9;
+  --warning:#c07a00; --warning-tint:#fbf0d9;
+  --accent:#0d7fa6;
+  --logo-text:#24478f;
+  --term-bg:#10151d; --term-text:#37d98a; --term-dim:#4f6b5d;
+  --focus:rgba(36,71,143,.18);
+  --shadow:0 1px 2px rgba(20,30,50,.05),0 6px 20px rgba(20,30,50,.06);
+  --shadow-lg:0 10px 30px -12px rgba(20,30,50,.45);
+  color-scheme:light;
+}
+
+/* ================= 2. BASE ================= */
+*,*::before,*::after{box-sizing:border-box}
+html,body{height:100%;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;overflow:hidden}
+h1,h2,h3{margin:0;letter-spacing:-.01em}
+a{color:var(--primary);text-decoration:none}
+a:hover{text-decoration:underline}
+code,.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+button{font-family:inherit}
+input,select,textarea{font-family:inherit}
+input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none;border-color:var(--primary)!important;box-shadow:0 0 0 3px var(--focus)}
+button:focus-visible,a:focus-visible{outline:2px solid var(--primary);outline-offset:2px;border-radius:4px}
+::selection{background:color-mix(in srgb,var(--primary) 28%,transparent)}
+::-webkit-scrollbar{width:11px;height:11px}
+::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:6px;border:2px solid transparent;background-clip:padding-box}
+::-webkit-scrollbar-track{background:transparent}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes blink{50%{opacity:.25}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* ================= 3. SHELL ================= */
+#app{display:grid;height:100%;grid-template-columns:238px 1fr;
+  grid-template-rows:58px 1fr;grid-template-areas:"mast mast" "menu content"}
+.app-header{grid-area:mast;display:flex;align-items:center;gap:16px;padding:0 18px;
+  background:var(--surface);border-bottom:1px solid var(--border);z-index:30}
+.logo{display:flex;align-items:center;gap:11px;color:var(--logo-text)}
+.logo svg{height:34px;width:auto;display:block}
+.logo .wm{font-size:18px;font-weight:800;letter-spacing:-.02em;color:var(--logo-text)}
+.logo .wm b{color:var(--accent)}
+.logo:hover{text-decoration:none}
+.conn-pill{display:flex;align-items:center;gap:9px;margin-left:6px;padding:5px 11px;
+  background:var(--surface-2);border:1px solid var(--border);border-radius:9px}
+.conn-pill .cdot{width:8px;height:8px;border-radius:50%;background:var(--success);
+  box-shadow:0 0 0 3px var(--success-tint);animation:pulse 2.4s ease-in-out infinite}
+.conn-pill.offline .cdot{background:var(--danger);box-shadow:0 0 0 3px var(--danger-tint);animation:none}
+.conn-pill.reboot .cdot{background:var(--warning);box-shadow:0 0 0 3px var(--warning-tint)}
+.conn-pill .cid{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text)}
+.conn-pill .cbar{width:1px;height:13px;background:var(--border-strong)}
+.conn-pill .cip{font-family:var(--mono);font-size:12px;color:var(--text-2)}
+.conn-pill .ctag{font-size:10px;font-weight:700;color:var(--text-3);letter-spacing:.04em;
+  padding:1px 5px;background:var(--surface-3);border-radius:4px}
+.hspacer{flex:1}
+.hbtn{width:36px;height:36px;display:flex;align-items:center;justify-content:center;
+  background:var(--surface-2);border:1px solid var(--border);border-radius:9px;color:var(--text-2);cursor:pointer}
+.hbtn:hover{background:var(--surface-3);border-color:var(--border-strong)}
+.hbtn svg{width:17px;height:17px}
+#submitbtn{display:inline-flex;align-items:center;gap:8px;padding:9px 17px;border:none;
+  border-radius:9px;font-size:13.5px;font-weight:700;cursor:default;
+  background:var(--surface-2);color:var(--text-3)}
+#submitbtn.dirty{background:var(--primary);color:var(--on-primary);cursor:pointer}
+#submitbtn.dirty:hover{background:var(--primary-2)}
+#submitbtn svg{width:15px;height:15px}
+
+/* nav */
+.app-nav{grid-area:menu;background:var(--surface);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;overflow-y:auto}
+.nav-label{padding:14px 12px 8px;font-size:10.5px;font-weight:800;letter-spacing:.1em;color:var(--text-3)}
+.nav-btn{display:flex;align-items:center;gap:11px;width:calc(100% - 16px);margin:1px 8px;padding:10px 12px;
+  border:none;border-radius:9px;font-size:13.5px;font-weight:600;cursor:pointer;text-align:left;
+  background:transparent;color:var(--text-2)}
+.nav-btn:hover{background:var(--surface-2);color:var(--text);text-decoration:none}
+.nav-btn.on,.nav-btn.on:hover{background:var(--primary);color:var(--on-primary)}
+.nav-btn svg{width:19px;height:19px;flex:none}
+.nav-btn .nl{flex:1;text-align:left}
+.nav-spacer{flex:1}
+.nav-warn{margin:12px 12px 14px;padding:12px 13px;background:var(--warning-tint);
+  border:1px solid color-mix(in srgb,var(--warning) 30%,transparent);border-radius:10px}
+.nav-warn .nw-h{display:flex;align-items:center;gap:7px;margin-bottom:5px;font-size:12px;font-weight:700;color:var(--warning)}
+.nav-warn .nw-h svg{width:14px;height:14px}
+.nav-warn .nw-b{font-size:11.5px;color:var(--text-2);line-height:1.4}
+.nav-warn.crit{background:var(--danger-tint);border-color:color-mix(in srgb,var(--danger) 30%,transparent)}
+.nav-warn.crit .nw-h{color:var(--danger)}
+
+/* content */
+.content{grid-area:content;overflow-y:auto;position:relative}
+.page{max-width:1080px;margin:0;padding:24px 32px 60px;display:flex;flex-direction:column;gap:16px}
+.page.wide{max-width:1280px}
+.phead h1{font-size:24px;font-weight:800;letter-spacing:-.02em;color:var(--text);margin:0 0 4px}
+.phead .desc{margin:0;font-size:14px;color:var(--text-2)}
+.phead{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:4px}
+.phead>div:first-child{flex:1;min-width:0}
+.phead .tools{display:flex;gap:8px;align-items:center}
+
+/* ================= 4. COMPONENTS ================= */
+/* card (aka .section) */
+.section{background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow)}
+.section>.legend{padding:16px 22px 0;display:flex;align-items:center;gap:9px}
+.section>.legend h3{font-size:14.5px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:9px}
+.section>.legend .ldesc{color:var(--text-3);font-size:12px;font-weight:500}
+.section>.legend .tools{margin-left:auto;display:flex;gap:8px}
+.section>.body{padding:14px 22px 20px}
+.cico{width:26px;height:26px;border-radius:7px;background:var(--primary-tint);color:var(--primary);
+  display:inline-flex;align-items:center;justify-content:center;flex:none}
+.cico svg{width:15px;height:15px}
+
+/* form rows */
+.frow{display:grid;grid-template-columns:200px 1fr;gap:5px 20px;align-items:center;padding:8px 0}
+.frow>label{color:var(--text-2);font-weight:600;font-size:13.5px}
+.frow .help{grid-column:1/-1;color:var(--text-3);font-size:12px}
+.frow .ctl{min-width:0}
+.help{color:var(--text-3);font-size:12px}
+input,select,textarea{width:100%;height:37px;color:var(--text);background:var(--surface-2);
+  border:1px solid var(--border);border-radius:8px;padding:0 11px;font-size:13.5px}
+textarea{height:auto;min-height:70px;padding:9px 11px;font-family:var(--mono);font-size:12.5px;line-height:1.5;resize:vertical}
+select{cursor:pointer;appearance:none;padding-right:28px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='11' viewBox='0 0 24 24' fill='none' stroke='%238a95a4' stroke-width='3'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center}
+input[type="range"]{height:auto;padding:0;background:transparent;border:none;accent-color:var(--primary)}
+input[type="checkbox"]{width:auto;height:auto}
+.rowflex{display:flex;gap:8px;align-items:center}
+.grow{flex:1;min-width:0}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;gap:7px;padding:8px 14px;height:auto;
+  background:var(--surface-2);color:var(--text);border:1px solid var(--border);border-radius:8px;
+  font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn:hover{background:var(--surface-3);border-color:var(--border-strong)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn svg{width:14px;height:14px}
+.btn.pri{background:var(--primary);border-color:var(--primary);color:var(--on-primary)}
+.btn.pri:hover{background:var(--primary-2);border-color:var(--primary-2)}
+.btn.danger{background:var(--danger-tint);color:var(--danger);border-color:color-mix(in srgb,var(--danger) 30%,transparent)}
+.btn.danger:hover{background:var(--danger);color:#fff}
+.btn.sm{padding:7px 11px;font-size:12.5px}
+.btn.gh{background:transparent;border-color:transparent;color:var(--text-2)}
+.btn.gh:hover{background:var(--surface-2);color:var(--text)}
+
+/* kv */
+.kv{display:grid;grid-template-columns:auto 1fr;gap:0 18px;margin:0}
+.kv dt{color:var(--text-2);font-size:13px;padding:9px 0;border-bottom:1px solid var(--border)}
+.kv dd{margin:0;text-align:right;font-weight:600;font-size:13px;font-family:var(--mono);
+  font-variant-numeric:tabular-nums;padding:9px 0;border-bottom:1px solid var(--border);overflow-wrap:anywhere}
+.kv dt:nth-last-of-type(1),.kv dd:last-of-type{border-bottom:none}
+
+/* chips */
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;
+  padding:4px 11px;border-radius:20px;background:var(--surface-3);color:var(--text-2)}
+.chip .d{width:7px;height:7px;border-radius:50%;background:var(--text-3)}
+.chip.ok{background:var(--success-tint);color:var(--success)}.chip.ok .d{background:var(--success)}
+.chip.warn{background:var(--warning-tint);color:var(--warning)}.chip.warn .d{background:var(--warning)}
+.chip.crit{background:var(--danger-tint);color:var(--danger)}.chip.crit .d{background:var(--danger)}
+.chip.info{background:var(--primary-tint);color:var(--primary)}.chip.info .d{background:var(--primary)}
+
+/* tables */
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{text-align:left;font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--text-3);padding:10px 12px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--surface);z-index:1}
+.tbl td{padding:9px 12px;border-bottom:1px solid var(--border);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:none}
+.tbl tr:hover td{background:var(--surface-2)}
+.tbl .num{text-align:right;font-family:var(--mono)}
+.scroll{overflow-x:auto}
+@media(max-width:639px){
+  .rtable thead{display:none}
+  .rtable tr{display:block;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;padding:4px 12px}
+  .rtable td{display:flex;justify-content:space-between;border:none;padding:6px 0;gap:12px}
+  .rtable td::before{content:attr(data-k);color:var(--text-3);font-weight:600;font-size:12px}
+}
+
+/* stat tiles */
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.tile{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 17px;box-shadow:var(--shadow)}
+.tile .th{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.tile .tk{font-size:11.5px;font-weight:700;letter-spacing:.03em;color:var(--text-3);text-transform:uppercase}
+.tile .ti{width:30px;height:30px;border-radius:8px;background:var(--primary-tint);color:var(--primary);
+  display:flex;align-items:center;justify-content:center}
+.tile .ti svg{width:16px;height:16px}
+.tile .tv{font-size:23px;font-weight:800;letter-spacing:-.01em;color:var(--text);font-family:var(--mono);font-variant-numeric:tabular-nums}
+.tile .tv small{font-size:12.5px;font-weight:600;color:var(--text-3)}
+.tile .tc{font-size:12px;color:var(--text-2);margin-top:3px}
+.tile.warn .tv{color:var(--warning)}.tile.crit .tv{color:var(--danger)}
+
+/* meter / gauge bar */
+.meter{height:6px;border-radius:4px;background:var(--surface-3);overflow:hidden}
+.meter i{display:block;height:100%;background:var(--primary);border-radius:4px;transition:width .5s}
+.meter.ok i{background:var(--success)}.meter.warn i{background:var(--warning)}.meter.crit i{background:var(--danger)}
+
+/* info / warn notes */
+.note{margin-top:14px;padding:11px 13px;background:var(--surface-2);border:1px solid var(--border);
+  border-radius:9px;display:flex;gap:9px;align-items:flex-start;font-size:12.5px;color:var(--text-2);line-height:1.45}
+.note svg{width:15px;height:15px;flex:none;margin-top:1px;color:var(--text-3)}
+.note.warn{background:var(--warning-tint);border-color:color-mix(in srgb,var(--warning) 30%,transparent)}
+.note.warn svg{color:var(--warning)}
+.banner{padding:11px 14px;border-radius:9px;font-size:13px;font-weight:550;display:flex;gap:10px;align-items:flex-start}
+.banner svg{width:16px;height:16px;flex:none;margin-top:1px}
+.banner.warn{background:var(--warning-tint);border:1px solid color-mix(in srgb,var(--warning) 30%,transparent);color:var(--text-2)}
+.banner.crit{background:var(--danger-tint);border:1px solid color-mix(in srgb,var(--danger) 30%,transparent);color:var(--text-2)}
+.banner.crit svg{color:var(--danger)}.banner.warn svg{color:var(--warning)}
+.banner.info{background:var(--primary-tint);border:1px solid color-mix(in srgb,var(--primary) 25%,transparent);color:var(--text-2)}
+.banner.info svg{color:var(--primary)}
+
+/* console (Logs page) */
+.console{margin:0;padding:14px 16px;overflow-y:auto;font-family:var(--mono);
+  font-size:13px;line-height:1.55;color:var(--term-text);white-space:pre-wrap;word-break:break-word;
+  background:var(--term-bg);border:1px solid var(--border);border-radius:12px;height:46vh}
+.console .in{color:#5b8fe0}.console .er{color:#f2686b}.console .wn{color:#e0a955}.console .dim{color:var(--term-dim)}
+
+/* upload dropzone */
+.drop{border:1.5px dashed var(--border-strong);border-radius:10px;padding:20px;text-align:center;background:var(--surface-2)}
+
+/* loading / empty */
+.loading{display:flex;justify-content:center;padding:44px}
+.spinner{width:22px;height:22px;border:2.5px solid var(--border-strong);border-top-color:var(--primary);border-radius:50%;animation:spin .7s linear infinite}
+.empty{text-align:center;color:var(--text-3);padding:30px;font-size:13px}
+.dim{color:var(--text-3)}
+
+/* toast / modal / offline */
+#toasts{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);z-index:80;display:flex;flex-direction:column;gap:8px;align-items:center;max-width:min(92vw,480px)}
+.toast{display:flex;align-items:center;gap:10px;padding:12px 20px;border-radius:11px;font-size:13.5px;font-weight:600;
+  box-shadow:0 10px 30px rgba(0,0,0,.2);background:var(--text);color:var(--bg);transition:opacity .25s}
+.toast.err{background:var(--danger);color:#fff}
+.toast.ok{background:var(--text);color:var(--bg)}
+#modal-root{position:fixed;inset:0;z-index:90;display:none;place-items:center;background:rgba(8,14,22,.5);padding:18px}
+#modal-root.on{display:grid}
+.modal{background:var(--surface);border:1px solid var(--border-strong);border-radius:13px;
+  box-shadow:var(--shadow-lg);max-width:460px;width:100%;padding:20px}
+.modal h3{font-size:16px;font-weight:700;margin-bottom:8px}
+.modal p{color:var(--text-2);font-size:13.5px;margin:0 0 16px}
+.modal .acts{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+#offline{position:fixed;left:50%;top:70px;transform:translateX(-50%);z-index:85;display:none;
+  align-items:center;gap:10px;background:var(--surface);border:1px solid var(--border-strong);border-radius:10px;
+  padding:10px 16px;box-shadow:var(--shadow-lg);font-weight:600;font-size:13px}
+#offline .d{width:9px;height:9px;border-radius:50%;background:var(--danger);animation:blink 1s infinite}
+#offline[data-k="reboot"] .d{background:var(--warning)}
+.tools{display:flex;gap:8px;align-items:center}
+
+/* ================= 5. RESPONSIVE (design 860/480) ================= */
+@media(max-width:860px){
+  #app{grid-template-columns:1fr;grid-template-rows:auto auto 1fr;grid-template-areas:"mast" "menu" "content"}
+  .app-header{height:auto;flex-wrap:wrap;padding:10px 14px;gap:10px}
+  .conn-pill{order:4;flex:1 1 100%;margin-left:0;justify-content:flex-start}
+  .app-nav{width:100%;flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:center;
+    overflow:visible;border-right:none;border-bottom:1px solid var(--border);padding:6px}
+  .nav-label,.nav-warn,.nav-spacer{display:none}
+  .nav-btn{width:auto;margin:3px;padding:8px 12px;flex:none;white-space:nowrap}
+  .nav-btn .nl{flex:none}
+  .page{padding:18px 14px 48px}
+  .tiles{grid-template-columns:repeat(2,1fr)}
+  .frow{grid-template-columns:1fr;gap:5px 0}
+  .frow>label{margin-top:10px}
+}
+@media(max-width:480px){
+  .tiles{grid-template-columns:1fr}
+}
+</style>
 </head>
 <body>
-<header id="topbar">
-  <button id="menu-btn" aria-label="Menu"></button>
-  <span id="brand">ESPNet<b>Link</b></span>
-  <span id="device-id"></span>
-</header>
-
-<div id="conn-pill" data-state="connecting">connecting</div>
-
-<div id="offline-banner" hidden>
-  <span id="offline-text">Device offline — reconnecting…</span>
+<div id="app">
+  <header class="app-header">
+    <a class="logo" href="#/status" aria-label="meatpi ESPNetLink">
+      <svg viewBox="0 0 101 101" xmlns="http://www.w3.org/2000/svg" role="img">
+        <path fill="#46d2eb" clip-rule="evenodd" fill-rule="evenodd" d="M50.459 95.503c-2.519 0-4.975-0.259-7.383-0.655l2.064-5.143c1.744 0.236 3.511 0.399 5.319 0.399c2.501 0 4.94-0.261 7.313-0.703l-5.998-6.497h-8.514h-1.8h-1.8v-5.398h-5.899c-0.623 1.07-1.771 1.8-3.099 1.8c-1.988 0-3.601-1.612-3.601-3.601s1.612-3.6 3.601-3.6c1.329 0 2.477 0.728 3.099 1.8h5.899v-1.8v-3.601h3.6H61.26v0.77l4.416 4.784c0.315-0.09 0.641-0.153 0.983-0.153c1.988 0 3.6 1.612 3.6 3.601c0 1.987-1.611 3.598-3.6 3.598s-3.599-1.61-3.599-3.598c0-0.296 0.044-0.579 0.11-0.854l-4.197-4.547H43.261v7.2H54.06v0.768l7.725 8.366c6.576-1.96 12.414-5.601 17.071-10.395l-5.483-5.939H72.06V55.081l-5.435-5.883c-1.503 1.309-3.101 2.702-4.651 4.053c-0.299 0.263-0.893 0.779-0.893 0.779l-1.621 0.024v0.051h-7.699c-0.623 1.072-1.771 1.801-3.1 1.801c-1.988 0-3.6-1.612-3.6-3.601s1.612-3.599 3.6-3.599c1.329 0 2.477 0.728 3.1 1.8h7.699v0.393l10.799-9.623V27.107h-7.198v7.7c1.07 0.623 1.798 1.771 1.798 3.099c0 1.988-1.61 3.601-3.599 3.601c-1.987 0-3.6-1.612-3.6-3.601c0-1.329 0.728-2.477 1.8-3.099v-7.7v-1.8v-1.8h10.799v-7.183c-1.426-0.825-2.89-1.593-4.421-2.238c-0.573 0.264-1.206 0.422-1.879 0.422c-2.484 0-4.499-2.015-4.499-4.5c0-2.484 2.015-4.499 4.499-4.499c2.243 0 4.087 1.644 4.428 3.788c15.918 6.93 27.07 22.741 27.07 41.209C95.457 75.357 75.312 95.503 50.459 95.503z M81.058 52.306c-1.988 0-3.599-1.61-3.599-3.599c0-1.329 0.729-2.477 1.799-3.101V30.708h1.8h1.801h1.87c-2.753-4.731-6.471-8.829-10.869-12.054v26.453h-2.542c-0.584 0.508-1.25 1.09-1.978 1.723l6.525 7.069l-0.271 0.207h0.064v5.4h2.3c0.622-1.072 1.77-1.8 3.099-1.8c1.988 0 3.601 1.612 3.601 3.601c0 1.987-1.612 3.6-3.601 3.6c-1.329 0-2.477-0.729-3.099-1.8h-2.3v6.168l5.598 6.063c5.489-6.791 8.802-15.415 8.802-24.831c0-5.783-1.266-11.257-3.498-16.199h-3.702v11.298c1.072 0.625 1.8 1.772 1.8 3.101C84.658 50.695 83.046 52.306 81.058 52.306z M50.459 10.908c-1.214 0-2.412 0.076-3.598 0.183v11.386l4.416 4.784c0.314-0.09 0.64-0.153 0.982-0.153c1.988 0 3.601 1.612 3.601 3.601c0 1.988-1.612 3.6-3.601 3.6s-3.599-1.612-3.599-3.6c0-0.295 0.044-0.579 0.111-0.853l-2.535-2.748h-1.918l-6.35 5.536l4.86 5.263h0.431v0.468l0.018 0.02l-0.018 0.016v22.897H61.76c0.622-1.073 1.77-1.801 3.099-1.801c1.988 0 3.601 1.612 3.601 3.601s-1.612 3.599-3.601 3.599c-1.329 0-2.477-0.729-3.099-1.799H43.261h-1.8h-1.8V39.782L23.152 21.899c-1 0.953-1.942 1.963-2.839 3.015L35.63 41.507h0.431v0.467l0.018 0.02l-0.018 0.016v21.097v3.599h-3.599h-9h-1.798h-1.8v-8.999h-8.327c2.744 14.895 13.823 26.857 28.229 30.896l-2.025 5.049C19.088 88.158 5.464 70.936 5.464 50.507c0-24.852 20.146-44.997 44.996-44.997c2.447 0 4.831 0.248 7.172 0.624l-2.062 5.142C53.893 11.06 52.196 10.908 50.459 10.908z M18.068 27.79c-4.534 6.425-7.206 14.251-7.206 22.717c0 1.214 0.063 2.412 0.171 3.599h12.428v1.801v1.8v5.4h9V43.382l-5.627-6.095l-5.231 7.245c0.031 0.188 0.06 0.378 0.06 0.575c0 1.988-1.612 3.6-3.6 3.6s-3.6-1.612-3.6-3.6s1.612-3.6 3.6-3.6c0.401 0 0.779 0.081 1.139 0.202l5.142-7.12L18.068 27.79z M43.261 11.594c-6.497 1.195-12.418 3.998-17.389 7.942l9.656 10.461l7.733-6.742V11.594z"></path>
+      </svg>
+      <span class="wm">ESPNet<b>Link</b></span>
+    </a>
+    <div class="conn-pill" id="connpill">
+      <span class="cdot"></span>
+      <span class="cid" id="cp-id">ESPNetLink</span>
+      <span class="cbar"></span>
+      <span class="cip" id="cp-ip">—</span>
+      <span class="ctag" id="cp-tag">…</span>
+    </div>
+    <div class="hspacer"></div>
+    <button class="hbtn" id="themebtn" title="Toggle theme" aria-label="Theme"></button>
+    <button id="submitbtn" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><path d="M17 21v-8H7v8M7 3v5h8"></path></svg>
+      <span id="submitlabel">Saved</span>
+    </button>
+  </header>
+  <nav class="app-nav" id="menu"></nav>
+  <main class="content"><div class="page" id="view"><div class="loading"><div class="spinner"></div></div></div></main>
 </div>
-
-<nav id="sidebar"></nav>
-<div id="scrim"></div>
-<main id="view"></main>
-
+<div id="offline"><span class="d"></span><span id="offtx"></span></div>
 <div id="toasts"></div>
+<div id="modal-root"></div>
 
-<script type="module" src="js/app.js"></script>
+<script>
+"use strict";
+/* ============================================================ CORE */
+const $=(s,r=document)=>r.querySelector(s);
+const API=new URLSearchParams(location.search).get("api")||"";
+
+function h(tag,attrs,...kids){
+  const e=document.createElement(tag);
+  if(attrs)for(const[k,v]of Object.entries(attrs)){
+    if(v==null||v===false)continue;
+    if(k==="class")e.className=v;
+    else if(k==="html")e.innerHTML=v;
+    else if(k==="dataset")Object.assign(e.dataset,v);
+    else if(k[0]==="o"&&k[1]==="n")e.addEventListener(k.slice(2),v);
+    else e.setAttribute(k,v===true?"":v);
+  }
+  for(const c of kids.flat(9)){if(c==null||c===false)continue;e.append(c.nodeType?c:document.createTextNode(c));}
+  return e;
+}
+async function api(path,opts={}){
+  const o={...opts};
+  if(o.body!==undefined&&!(o.body instanceof FormData)&&!(o.body instanceof ArrayBuffer)){
+    o.headers={"Content-Type":"application/json",...(o.headers||{})};o.body=JSON.stringify(o.body);
+  }
+  const res=await fetch(API+path,o);
+  const ct=res.headers.get("content-type")||"";
+  let data; if(ct.includes("json")){try{data=await res.json();}catch{data=null;}} else data=await res.text();
+  if(!res.ok)throw new Error((data&&data.error)?data.error:(typeof data==="string"&&data)||("HTTP "+res.status));
+  return data;
+}
+async function tryGet(p){try{return await api(p);}catch{return null;}}
+function toast(msg,kind=""){const t=h("div",{class:"toast "+kind},
+  h("span",{html:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'}),msg);
+  $("#toasts").append(t);setTimeout(()=>{t.style.opacity=0;setTimeout(()=>t.remove(),250);},3200);}
+const fmt={
+  bytes(n){if(n==null)return"—";if(n>=1048576)return(n/1048576).toFixed(2)+" MB";if(n>=1024)return(n/1024).toFixed(1)+" KB";return n+" B";},
+  dur(s){if(s==null)return"—";s=Math.floor(s);const d=(s/86400|0);s%=86400;const H=(s/3600|0);s%=3600;const m=(s/60|0);return(d?d+"d ":"")+(H||d?H+"h ":"")+m+"m";},
+  num(n){return n==null?"—":n.toLocaleString();},
+};
+/* icons — lucide-style strokes from the design */
+const IC={
+  signal:'<path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V6"/>',
+  settings:'<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
+  radio:'<circle cx="12" cy="12" r="2"/><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.2 19.1 19.1"/>',
+  mappin:'<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>',
+  sliders:'<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="2" y1="14" x2="6" y2="14"/><line x1="10" y1="8" x2="14" y2="8"/><line x1="18" y1="16" x2="22" y2="16"/>',
+  cpu:'<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/>',
+  shield:'<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1 1 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>',
+  info:'<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
+  wifi:'<path d="M1.42 9a16 16 0 0 1 21.16 0M5 12.55a11 11 0 0 1 14.08 0M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/>',
+  activity:'<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+  clock:'<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+  home:'<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>',
+  upload:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/>',
+  download:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/>',
+  refresh:'<path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/>',
+  trash:'<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>',
+  plus:'<path d="M12 5v14M5 12h14"/>',
+  alert:'<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4M12 17h.01"/>',
+  sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>',
+  moon:'<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+  key:'<circle cx="8" cy="12" r="3"/><path d="M11 12h9l-2 2 2 2M14 12v3"/>',
+  users:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+  bug:'<path d="M8 8a4 4 0 0 1 8 0v4a4 4 0 0 1-8 0z"/><path d="M8 10H4M20 10h-4M8 14H4M20 14h-4M12 4V2"/>',
+  terminal:'<path d="M12 19h8"/><path d="m4 17 6-6-6-6"/>',
+  folder:'<path d="M4 6h6l2 2h8v11H4z"/>',
+  logs:'<path d="M6 4h12v16H6z"/><path d="M9 9h6M9 13h6M9 17h3"/>',
+  cog:'<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>',
+  up:'<path d="M12 20V8M6 12l6-6 6 6"/>',down:'<path d="M12 4v12M6 12l6 6 6-6"/>',
+};
+function svg(n){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${IC[n]||""}</svg>`;}
+function ic(n){const s=document.createElementNS("http://www.w3.org/2000/svg","svg");
+  s.setAttribute("viewBox","0 0 24 24");s.setAttribute("fill","none");s.setAttribute("stroke","currentColor");
+  s.setAttribute("stroke-width","2");s.setAttribute("stroke-linecap","round");s.setAttribute("stroke-linejoin","round");
+  s.innerHTML=IC[n]||"";return s;}
+
+/* theme */
+(function(){const sv=localStorage.getItem("espnetlink-theme");if(sv)document.documentElement.setAttribute("data-theme",sv);
+  const b=$("#themebtn");const cur=()=>document.documentElement.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");
+  const paint=()=>b.innerHTML=svg(cur()==="dark"?"sun":"moon");
+  b.onclick=()=>{const n=cur()==="dark"?"light":"dark";document.documentElement.setAttribute("data-theme",n);localStorage.setItem("espnetlink-theme",n);paint();};paint();})();
+
+/* modal / confirm / prompt */
+function modal({title,body,actions}){
+  const root=$("#modal-root");
+  const close=()=>{root.classList.remove("on");root.replaceChildren();};
+  const acts=h("div",{class:"acts"});
+  const m=h("div",{class:"modal"},title?h("h3",{},title):null,
+    typeof body==="string"?h("p",{},body):body,acts);
+  actions.forEach(a=>acts.append(h("button",{class:"btn "+(a.kind||""),onclick:()=>{close();a.fn&&a.fn();}},a.label)));
+  root.replaceChildren(m);root.classList.add("on");
+  root.onclick=e=>{if(e.target===root)close();};
+  return close;
+}
+function confirmModal(msg,title="Please confirm"){return new Promise(res=>{
+  modal({title,body:msg,actions:[{label:"Cancel",fn:()=>res(false)},{label:"Continue",kind:"pri",fn:()=>res(true)}]});});}
+function promptModal(label,def=""){return new Promise(res=>{
+  const inp=h("input",{value:def});
+  modal({title:label,body:h("div",{},inp),actions:[{label:"Cancel",fn:()=>res(null)},{label:"OK",kind:"pri",fn:()=>res(inp.value)}]});
+  setTimeout(()=>inp.focus(),30);});}
+
+/* ============================================================ SUBMIT STORE (header button) */
+const store={
+  pending:new Map(),dirty:new Set(),
+  stage(c,v){this.pending.set(c,v);this.dirty.add(c);renderSubmit();},
+  count(){return this.dirty.size;},
+  summary(){return[...this.dirty].map(niceName).join(", ");},
+  revert(){this.pending.clear();this.dirty.clear();renderSubmit();route();},
+  async apply(){
+    if(!this.count())return;
+    const need=await confirmModal("Applying these changes restarts ESPNetLink (~15 s) to take effect. Continue?","Submit changes");
+    if(!need)return;
+    try{
+      for(const[c,v]of this.pending)await api("/api/settings/"+c,{method:"PUT",body:v});
+      const r=await api("/api/settings/submit",{method:"POST"});
+      this.pending.clear();this.dirty.clear();renderSubmit();
+      if(r&&r.reboot)expectReboot("Applying settings");else toast("Saved — no restart needed","ok");
+    }catch(e){toast("Apply failed: "+e.message,"err");}
+  },
+};
+function renderSubmit(){const b=$("#submitbtn");const n=store.count();
+  b.classList.toggle("dirty",n>0);b.disabled=n===0;
+  $("#submitlabel").textContent=n?("Submit Changes ("+n+")"):"Saved";
+  b.title=n?store.summary():"No pending changes";}
+$("#submitbtn").onclick=()=>store.apply();
+
+/* ============================================================ WATCHDOG + CONN PILL */
+const conn={state:"connecting",status:null,wifi:null,info:null,rebootUntil:0,settings:[]};
+function paintPill(){
+  const pill=$("#connpill");const st=conn.status||{};const w=conn.wifi||{};
+  pill.classList.toggle("offline",conn.state==="offline");
+  pill.classList.toggle("reboot",conn.state==="reboot");
+  const id=conn.info&&conn.info.device_id;
+  $("#cp-id").textContent=id?("ESPNetLink_"+String(id).slice(-4).toUpperCase()):"ESPNetLink";
+  const b=st.bits||{};
+  $("#cp-ip").textContent=w.ip||w.ap_ip||location.hostname;
+  $("#cp-tag").textContent=conn.state!=="online"?(conn.state==="reboot"?"REBOOT":"OFFLINE"):(b.sta_connected?"STA":(w.ap_started||b.ap_enabled?"AP":"USB"));
+}
+function setConn(s,txt){
+  const prev=conn.state;conn.state=s;
+  const off=$("#offline");
+  if(s==="online"||s==="connecting")off.style.display="none";
+  else{off.style.display="flex";off.dataset.k=s==="reboot"?"reboot":"offline";$("#offtx").textContent=txt||"Device offline — reconnecting…";}
+  paintPill();
+  if(prev==="reboot"&&s==="online"){toast("Device back online","ok");route();}
+  else if(prev==="offline"&&s==="online")route();
+}
+function expectReboot(reason="Rebooting"){conn.rebootUntil=Date.now()+95000;setConn("reboot",reason+" — waiting for the device…");}
+async function ping(){
+  try{const st=await api("/api/status");conn.status=st;
+    conn.wifi=await tryGet("/api/wifi/status");
+    if(!conn.info)conn.info=await tryGet("/api/info");
+    setConn("online");
+  }catch{if(conn.state==="reboot"&&Date.now()<conn.rebootUntil){/*hold*/}else{setConn("offline");}}
+}
+setInterval(ping,3000);
+
+/* ============================================================ PAGE HELPERS */
+function pageHead(crumb,title,desc,tools){
+  return h("div",{class:"phead"},
+    h("div",{},h("h1",{},title),desc?h("p",{class:"desc"},desc):null),
+    tools&&tools.length?h("div",{class:"tools"},...tools):null);
+}
+function card(title,icon,...body){
+  return h("div",{class:"section"},
+    title?h("div",{class:"legend"},h("h3",{},icon?h("span",{class:"cico"},ic(icon)):null,title)):null,
+    h("div",{class:"body"},...body));
+}
+function cardTools(title,icon,tools,...body){
+  const s=card(title,icon,...body);
+  s.querySelector(".legend").append(h("span",{class:"tools"},...tools));
+  return s;
+}
+function section(legend,desc,...body){
+  const s=h("div",{class:"section"},
+    legend?h("div",{class:"legend"},h("h3",{},legend),desc?h("span",{class:"ldesc"},desc):null):null,
+    h("div",{class:"body"},...body));
+  return s;
+}
+function sectionTools(legend,tools,...body){
+  const s=section(legend,null,...body);
+  s.querySelector(".legend").append(h("span",{class:"tools"},...tools));
+  return s;
+}
+function kv(pairs){return h("dl",{class:"kv"},...pairs.filter(p=>p&&p[1]!=null).flatMap(([k,v])=>
+  [h("dt",{},k),h("dd",{},v&&v.nodeType?v:String(v))]));}
+function chip(txt,kind){return h("span",{class:"chip "+(kind||"")},h("span",{class:"d"}),txt);}
+function onoff(b,yes="On",no="Off"){return chip(b?yes:no,b?"ok":"");}
+function tile(k,v,unit,opt={}){return h("div",{class:"tile "+(opt.kind||"")},
+  h("div",{class:"th"},h("span",{class:"tk"},k),opt.icon?h("span",{class:"ti"},ic(opt.icon)):null),
+  h("div",{class:"tv"},v,unit?h("small",{}," "+unit):null),
+  opt.cap?h("div",{class:"tc"},opt.cap):null,
+  opt.fill!=null?h("div",{class:"meter "+(opt.fillKind||""),style:"margin-top:12px"},h("i",{style:"width:"+Math.min(100,Math.max(0,opt.fill)).toFixed(1)+"%"})):null);}
+function meter(val,max,kind){const p=max?Math.min(100,val/max*100):0;
+  return h("div",{class:"meter "+(kind||(p>90?"crit":p>75?"warn":""))},h("i",{style:"width:"+p.toFixed(0)+"%"}));}
+function dataTable(cols,rows,opt={}){
+  const t=h("table",{class:"tbl"+(opt.responsive!==false?" rtable":"")},
+    h("thead",{},h("tr",{},...cols.map(c=>h("th",{class:c.align==="right"?"num":""},c.label)))),
+    h("tbody",{},...rows.map(r=>h("tr",{},...cols.map(c=>{
+      let v=typeof c.get==="function"?c.get(r):r[c.key];
+      return h("td",{"data-k":c.label,class:(c.align==="right"?"num":"")+(c.mono?" mono":"")},v&&v.nodeType?v:(v==null?"—":String(v)));
+    })))));
+  if(!rows.length)return h("div",{class:"empty"},opt.empty||"Nothing here");
+  return h("div",{class:"scroll"},t);
+}
+function loading(){return h("div",{class:"loading"},h("div",{class:"spinner"}));}
+function banner(kind,icon,...body){return h("div",{class:"banner "+kind},ic(icon),h("div",{},...body));}
+function note(kind,txt){return h("div",{class:"note "+(kind||"")},ic(kind==="warn"?"alert":"info"),h("span",{},...(Array.isArray(txt)?txt:[txt])));}
+
+/* ---- schema form engine ---- */
+const SECRET=/password|passkey|token|auth_key|_key$|private_key|preshared|_pin$/i;
+const flabel=k=>k.replaceAll("_"," ").replace(/\b\w/g,c=>c.toUpperCase());
+function formRow(key,spec,state,onDirty){
+  const set=v=>{state[key]=v;onDirty();};const cur=state[key];let ctl;
+  if(spec.type==="boolean"){
+    ctl=h("select",{onchange:e=>set(e.target.value==="1")},
+      h("option",{value:"1",selected:!!cur},"Enable"),h("option",{value:"0",selected:!cur},"Disable"));
+  }else if(spec.enum){
+    ctl=h("select",{onchange:e=>set(e.target.value)},...spec.enum.map(v=>h("option",{value:v,selected:v===cur},v)));
+  }else if(spec.type==="integer"||spec.type==="number"){
+    ctl=h("input",{type:"number",value:cur??"",min:spec.minimum,max:spec.maximum,onchange:e=>set(e.target.value===""?0:Number(e.target.value))});
+  }else if(spec.type==="array"){
+    return arrayField(key,spec,state,onDirty);
+  }else{
+    const secret=SECRET.test(key);
+    const inp=h("input",{type:secret?"password":"text",value:cur??"",maxlength:spec.maxLength,autocomplete:secret?"new-password":"off",onchange:e=>set(e.target.value)});
+    ctl=secret?h("div",{class:"rowflex"},h("div",{class:"grow"},inp),h("button",{class:"btn sm gh",type:"button",onclick:()=>inp.type=inp.type==="password"?"text":"password"},"show")):inp;
+  }
+  return h("div",{class:"frow"},h("label",{},flabel(key)),h("div",{class:"ctl"},ctl),spec.description?h("div",{class:"help"},spec.description):null);
+}
+function arrayField(key,spec,state,onDirty){
+  const items=Array.isArray(state[key])?state[key]:(state[key]=[]);
+  const ip=spec.items&&spec.items.properties;
+  const list=h("div",{style:"display:flex;flex-direction:column;gap:8px"});
+  const rebuild=()=>list.replaceChildren(...items.map((it,i)=>
+    h("div",{style:"border:1px solid var(--border);border-radius:9px;padding:8px 12px;background:var(--surface-2)"},
+      h("div",{class:"rowflex",style:"justify-content:space-between;margin-bottom:4px"},
+        h("b",{style:"font-size:12px"},flabel(key).replace(/s$/,"")+" "+(i+1)),
+        h("button",{class:"btn sm gh danger",type:"button",onclick:()=>{items.splice(i,1);onDirty();rebuild();}},ic("trash"))),
+      ip?Object.entries(ip).map(([ik,is])=>formRow(ik,is,it,onDirty))
+        :h("textarea",{onchange:e=>{try{items[i]=JSON.parse(e.target.value);onDirty();}catch{toast("Invalid JSON","err");}}},JSON.stringify(it)))));
+  rebuild();
+  return h("div",{class:"frow"},h("label",{},flabel(key)+(spec.maxItems?` (max ${spec.maxItems})`:"")),
+    h("div",{class:"ctl"},list,h("button",{class:"btn sm",type:"button",style:"margin-top:8px",onclick:()=>{
+      if(spec.maxItems&&items.length>=spec.maxItems)return toast("Max "+spec.maxItems,"err");
+      const blank={};if(ip)for(const[ik,is]of Object.entries(ip))blank[ik]=is.type==="boolean"?false:(is.type==="integer"||is.type==="number")?(is.minimum??0):(is.enum?is.enum[0]:"");
+      items.push(blank);onDirty();rebuild();},},ic("plus"),"Add")));
+}
+async function settingsForm(component,keys,opts={}){
+  const values=opts.values||await api("/api/settings/"+component);
+  const schema=opts.schema||await api("/api/settings/"+component+"/schema");
+  delete values.degraded;delete values.pending_reboot;
+  const props=(schema&&schema.properties)||{};
+  const list=(keys||Object.keys(props)).filter(k=>props[k]);
+  /* progressive disclosure: while a component is disabled, only its
+     enable switch shows. opts.visible(state)=>keys|null overrides
+     (null = all); opts.visible:false disables gating.
+     opts.advanced=[keys] (or advancedExcept=[essentials]) hides rows
+     behind a per-card "Show advanced" toggle; `cli` is always advanced. */
+  let vis=opts.visible;
+  if(vis===undefined&&props.enabled&&props.enabled.type==="boolean"&&list.includes("enabled"))
+    vis=st=>st.enabled?null:["enabled"];
+  const adv=new Set(opts.advancedExcept?list.filter(k=>!opts.advancedExcept.includes(k)):(opts.advanced||[]));
+  if(list.includes("cli"))adv.add("cli");
+  let advOn=false,sync=()=>{};
+  const onDirty=()=>{store.stage(component,values);sync();opts.onDirty&&opts.onDirty();};
+  const rows=list.map(k=>{const r=formRow(k,props[k],values,onDirty);r.dataset.key=k;return r;});
+  let advRow=null;
+  if([...adv].some(k=>list.includes(k))){
+    const btn=h("button",{class:"btn sm gh",type:"button",onclick:()=>{
+      advOn=!advOn;
+      btn.replaceChildren(ic(advOn?"up":"down"),advOn?" Hide advanced":" Show advanced");
+      sync();}},ic("down")," Show advanced");
+    advRow=h("div",{class:"frow"},h("label",{}),h("div",{class:"ctl"},btn));
+    advRow.dataset.key="__advtoggle";
+    rows.push(advRow);
+  }
+  sync=()=>{
+    const v=vis?vis(values):null;
+    const show=k=>(!v||v.includes(k));
+    let anyAdv=false;
+    rows.forEach(r=>{const k=r.dataset.key;
+      if(k==="__advtoggle")return;
+      const isAdv=adv.has(k);
+      if(isAdv&&show(k))anyAdv=true;
+      r.style.display=(show(k)&&(!isAdv||advOn))?"":"none";});
+    if(advRow)advRow.style.display=anyAdv?"":"none";
+  };
+  sync();
+  rows.sync=sync; /* external state writers (mode dropdowns) re-sync via this */
+  rows.load=()=>rows.forEach(r=>{const k=r.dataset.key;
+    if(!props[k]||props[k].type==="array")return;
+    const el=r.querySelector("select,input");if(!el)return;
+    const v=values[k];
+    if(el.tagName==="SELECT")el.value=props[k].type==="boolean"?(v?"1":"0"):String(v??"");
+    else el.value=v??"";});
+  return rows;
+}
+/* Map a standard wg-quick .conf onto the vpn_manager keys (client-side).
+   Returns the number of recognized fields. */
+function importWgConf(text,vals){
+  let sec="",n=0;const allowed=[];
+  vals.preshared_key="";
+  for(let line of text.split("\n")){
+    line=line.trim();
+    if(!line||line.startsWith("#"))continue;
+    if(line.startsWith("[")&&line.endsWith("]")){sec=line.slice(1,-1).toLowerCase();continue;}
+    const i=line.indexOf("=");if(i<0)continue;
+    const k=line.slice(0,i).trim().toLowerCase(),v=line.slice(i+1).trim();
+    if(sec==="interface"){
+      if(k==="privatekey"){vals.private_key=v;n++;}
+      else if(k==="address"){vals.address=v.split(",")[0].trim().split("/")[0];n++;}
+      else if(k==="dns"){const v4=v.split(",").map(s=>s.trim()).find(s=>/^\d{1,3}(\.\d{1,3}){3}$/.test(s));if(v4){vals.dns=v4;n++;}}
+    }else if(sec==="peer"){
+      if(k==="publickey"){vals.peer_public_key=v;n++;}
+      else if(k==="presharedkey"){vals.preshared_key=v;n++;}
+      else if(k==="endpoint"){const ci=v.lastIndexOf(":");
+        if(ci>0){vals.endpoint=v.slice(0,ci);vals.port=Number(v.slice(ci+1))||51820;}
+        else vals.endpoint=v;n++;}
+      else if(k==="persistentkeepalive"){vals.keepalive_s=Number(v)||0;n++;}
+      else if(k==="allowedips"){v.split(",").map(s=>s.trim())
+        .filter(s=>s&&!s.includes(":")).forEach(p=>allowed.push(p));n++;}
+    }
+  }
+  if(allowed.length){
+    const full=allowed.includes("0.0.0.0/0");
+    vals.default_route=full;
+    const cidr=allowed.find(a=>a!=="0.0.0.0/0");
+    if(cidr){const[ip,bits]=cidr.split("/");vals.allowed_ip=ip;
+      if(bits!==undefined){const b=Number(bits);
+        const m=b===0?0:((0xFFFFFFFF<<(32-b))>>>0);
+        vals.allowed_ip_mask=[m>>>24,(m>>>16)&255,(m>>>8)&255,m&255].join(".");}}
+  }
+  if(!n)throw new Error("no WireGuard fields found in the file");
+  return n;
+}
+
+/* ============================================================ NAV + ROUTER */
+const NAV=[
+  {g:"DEVICE"},
+  {r:"status",t:"Status",i:"signal"},
+  {r:"settings",t:"Settings",i:"settings"},
+  {r:"cellular",t:"Cellular",i:"radio"},
+  {r:"gps",t:"GPS",i:"mappin"},
+  {r:"vpn",t:"VPN",i:"shield"},
+  {r:"advanced",t:"Advanced",i:"sliders"},
+  {r:"system",t:"System",i:"cpu"},
+  {r:"about",t:"About",i:"info"},
+  {g:"TOOLS"},
+  {r:"files",t:"Files",i:"folder"},
+  {r:"logs",t:"Logs",i:"logs"},
+  {r:"sysmon",t:"System Monitor",i:"activity"},
+  {r:"allsettings",t:"All Settings",i:"cog"},
+];
+function buildMenu(active){
+  const el=$("#menu");el.replaceChildren();
+  const degraded=conn.settings.filter(c=>c.degraded).map(c=>c.name);
+  const pending=conn.settings.filter(c=>c.pending_reboot).map(c=>c.name);
+  for(const n of NAV){
+    if(n.g){el.append(h("div",{class:"nav-label"},n.g));continue;}
+    const b=h("button",{class:"nav-btn"+(n.r===active?" on":""),onclick:()=>{location.hash="#/"+n.r;}});
+    b.append(ic(n.i),h("span",{class:"nl"},n.t));
+    el.append(b);
+  }
+  el.append(h("div",{class:"nav-spacer"}));
+  if(degraded.length)
+    el.append(h("div",{class:"nav-warn crit"},
+      h("div",{class:"nw-h"},ic("alert"),h("span",{},"Settings problem")),
+      h("div",{class:"nw-b"},degraded.map(niceName).join(", ")+" fell back to defaults — check ",
+        h("a",{href:"#/allsettings"},"All Settings"),".")));
+  else if(pending.length)
+    el.append(h("div",{class:"nav-warn"},
+      h("div",{class:"nw-h"},ic("alert"),h("span",{},"Restart pending")),
+      h("div",{class:"nw-b"},niceList(pending)+" changed — ",
+        h("a",{href:"#",onclick:async e=>{e.preventDefault();if(await confirmModal("Restart ESPNetLink now?","Reboot")){try{await api("/api/restart",{method:"POST"});}catch{}expectReboot("Restarting");}}},"reboot to apply"),".")));
+}
+function niceList(names){return names.slice(0,3).map(niceName).join(", ")+(names.length>3?" +"+(names.length-3):"");}
+let cleanup=null,curSection=null;
+async function route(){
+  const parts=location.hash.replace(/^#\/?/,"").split("/");
+  let section=parts[0]||"status";const sub=parts[1]||null;
+  if(!PAGES[section])section="status";
+  if(curSection&&curSection!==section&&store.count()){
+    const stay=await new Promise(res=>modal({title:"Unsaved changes",
+      body:"You have "+store.count()+" unsaved change(s). Submit them, discard, or stay on this page?",
+      actions:[{label:"Stay",fn:()=>res(true)},{label:"Discard",kind:"danger",fn:()=>{store.pending.clear();store.dirty.clear();renderSubmit();res(false);}},{label:"Submit",kind:"pri",fn:()=>{store.apply();res(true);}}]}));
+    if(stay){location.hash="#/"+curSection;return;}
+  }
+  curSection=section;
+  buildMenu(section);
+  if(cleanup){try{cleanup();}catch{}cleanup=null;}
+  const view=$("#view");view.replaceChildren(loading());
+  try{cleanup=await PAGES[section](view,sub)||null;}
+  catch(e){view.replaceChildren(pageHead(null,section,null),banner("crit","alert","Failed to load: "+(e.message||e)));}
+}
+window.addEventListener("hashchange",route);
+function page(view,crumb,title,desc,tools){const p=h("div",{class:"page"});view.replaceChildren(p);
+  p.append(pageHead(crumb,title,desc,tools));return p;}
+
+/* ============================================================ PAGES */
+const PAGES={};
+/* ---- Status ---- */
+PAGES.status=async(view)=>{
+  const p=page(view,null,"Status","Live overview of the device, uplinks and position.");
+  const cardsEl=h("div",{class:"tiles"});
+  const colsEl=h("div",{style:"display:grid;grid-template-columns:1fr 1fr;gap:16px"});
+  p.append(cardsEl,colsEl);
+  async function refresh(){
+    const st=conn.status||await tryGet("/api/status");if(!st)return;
+    const b=st.bits||{};
+    const[w,lte,gps,vpn,imu]=await Promise.all(["/api/wifi/status","/api/lte","/api/gps","/api/vpn","/api/imu"].map(tryGet));
+    const mode=b.sta_connected?(w&&w.ap_started?"AP+STA":"STA"):(w&&w.ap_started?"AP":"—");
+    const lteOk=lte&&lte.valid!==false;
+    const gpsOk=gps&&gps.valid!==false;
+    cardsEl.replaceChildren(
+      tile("Connection",mode,null,{icon:"wifi",cap:w?(b.sta_connected?("IP "+(w.ip||"—")):(w.ap_started?((w.clients||0)+" client(s) on AP"):"interface down")):"—"}),
+      tile("LTE",lteOk&&lte.rssi_dbm!=null?lte.rssi_dbm:"—",lteOk&&lte.rssi_dbm!=null?"dBm":null,{icon:"radio",
+        cap:lteOk?(lte.connected?((lte.operator||"—")+(lte.network_type?" · "+lte.network_type:"")):(lte.attached?"Attached — no data":"Searching…")):"modem unavailable",
+        kind:lteOk&&!lte.connected?"warn":""}),
+      tile("GPS",gpsOk?String(gps.satellites??"—"):"—",gpsOk?"sats":null,{icon:"mappin",
+        cap:gpsOk?(gps.fix?("Fix · "+(gps.sats_in_view??"—")+" in view"):"No fix"):"receiver unavailable"}),
+      tile("Uptime",st.uptime||"—",null,{icon:"clock",cap:"Boot count "+(st.boot_count??"—")}));
+    colsEl.replaceChildren(
+      card("Network","wifi",kv([
+        ["WiFi Mode",mode],
+        ["Station",b.sta_connected?"Connected":"Not connected"],
+        ["IP Address",w&&w.ip?w.ip:"—"],
+        ["AP Address",w&&w.ap_ip?w.ap_ip:"—"],
+        ["AP Clients",w?(w.ap_started?String(w.clients||0):"AP off"):"—"],
+        ["mDNS",conn.info&&conn.info.device_id?("espnetlink_"+conn.info.device_id+".local"):"—"],
+        ["LTE IP",lteOk&&lte.ip?lte.ip:"—"],
+        ["VPN",vpn?(vpn.state||"disabled"):"—"],
+        ["VPN IP",vpn&&vpn.ts_ip?vpn.ts_ip:undefined]])),
+      card("System","cpu",kv([
+        ["Firmware",st.version||"—"],
+        ["Partition",st.partition||"—"],
+        ["Device ID",conn.info&&conn.info.device_id?conn.info.device_id:"—"],
+        ["Motion",imu?(imu.activity==="active"?"Active":imu.activity==="stationary"?"Stationary":"Unknown"):(b.motion?"Active":"Stationary")],
+        ["Time Synced",b.time_synced?"Yes":"No"],
+        ["Internal free",st.memory?fmt.bytes(st.memory.internal.free):"—"],
+        ["Die temp",st.temp_c!=null?st.temp_c.toFixed(1)+" °C":"—"],
+        ["Unexpected resets",st.unexpected_resets??"—"]])));
+  }
+  await refresh();const t=setInterval(()=>{if(conn.state==="online")refresh();},4000);return()=>clearInterval(t);
+};
+
+/* ---- Settings (WiFi AP + Station + mDNS + Home Assistant) ---- */
+
+/* Backup (fallback) STA networks: only populated slots render; Add
+   claims the next free slot. Writes the flat fallbackN_* keys. */
+function fallbackNetworks(vals,stage){
+  const open=new Set();
+  const list=h("div",{style:"display:flex;flex-direction:column;gap:8px"});
+  const add=h("button",{class:"btn sm",type:"button",onclick:()=>{
+    for(const i of[1,2,3,4,5]){
+      if(String(vals["fallback"+i+"_ssid"]||"")===""&&!open.has(i)){open.add(i);break;}
+    }
+    rebuild();}},ic("plus"),"Add backup network");
+  function rebuild(){
+    const act=[1,2,3,4,5].filter(i=>String(vals["fallback"+i+"_ssid"]||"")!==""||open.has(i));
+    list.replaceChildren(...act.map(i=>{
+      const k=s=>"fallback"+i+"_"+s;
+      const ipRow=h("div",{class:"rowflex",style:"gap:8px;flex-wrap:wrap;margin-top:8px"});
+      const paintIp=()=>{
+        const stat=vals[k("ip_mode")]==="static";
+        ipRow.replaceChildren(
+          h("select",{onchange:e=>{vals[k("ip_mode")]=e.target.value;stage();paintIp();}},
+            h("option",{value:"dhcp",selected:!stat},"DHCP"),
+            h("option",{value:"static",selected:stat},"Static IP")),
+          ...(stat?[
+            h("input",{class:"mono",value:vals[k("static_ip")]||"",placeholder:"IP address",style:"max-width:130px",
+              onchange:e=>{vals[k("static_ip")]=e.target.value;stage();}}),
+            h("input",{class:"mono",value:vals[k("static_netmask")]||"255.255.255.0",placeholder:"netmask",style:"max-width:130px",
+              onchange:e=>{vals[k("static_netmask")]=e.target.value;stage();}}),
+            h("input",{class:"mono",value:vals[k("static_gw")]||"",placeholder:"gateway (optional)",style:"max-width:150px",
+              onchange:e=>{vals[k("static_gw")]=e.target.value;stage();}})]:[]));
+      };
+      paintIp();
+      return h("div",{style:"border:1px solid var(--border);border-radius:9px;padding:8px 12px;background:var(--surface-2)"},
+        h("div",{class:"rowflex",style:"justify-content:space-between;margin-bottom:6px"},
+          h("b",{style:"font-size:12px"},"Backup network"),
+          h("button",{class:"btn sm gh danger",type:"button",onclick:()=>{
+            vals[k("ssid")]="";vals[k("password")]="";vals[k("trusted")]=true;
+            vals[k("ip_mode")]="dhcp";vals[k("static_ip")]="";vals[k("static_gw")]="";
+            open.delete(i);stage();rebuild();}},ic("trash"))),
+        h("div",{class:"rowflex",style:"gap:8px;flex-wrap:wrap"},
+          h("input",{value:vals[k("ssid")]||"",placeholder:"SSID",style:"max-width:180px",
+            onchange:e=>{vals[k("ssid")]=e.target.value;stage();}}),
+          h("input",{type:"password",value:vals[k("password")]||"",placeholder:"password",
+            autocomplete:"new-password",style:"max-width:180px",
+            onchange:e=>{vals[k("password")]=e.target.value;stage();}}),
+          h("label",{class:"rowflex",style:"gap:6px;font-size:12px;color:var(--text-2)"},
+            h("input",{type:"checkbox",checked:vals[k("trusted")]!==false,
+              onchange:e=>{vals[k("trusted")]=e.target.checked;stage();}}),"trusted")),
+        ipRow);
+    }));
+    add.style.display=act.length>=5?"none":"";
+  }
+  rebuild();
+  return h("div",{class:"frow"},h("label",{},"Backup Networks"),
+    h("div",{class:"ctl"},list,h("div",{style:"margin-top:8px"},add),
+      h("div",{class:"help"},"Tried in priority order when the main network is unavailable; the device roams back when a higher-priority network reappears.")));
+}
+
+PAGES.settings=async(view)=>{
+  const p=page(view,null,"Settings","WiFi, network discovery and Home Assistant.");
+  const wrap=h("div",{style:"display:flex;flex-direction:column;gap:16px"});p.append(wrap);
+  const AP_KEYS=["mode","ap_ssid","ap_password","ap_auth","ap_ip","ap_channel","ap_bandwidth","ap_hidden","ap_max_connections","ap_auto_disable","power_save","wifi_ram_profile","wifi_static_rx","wifi_static_tx","wifi_cache_tx"];
+  const scanBtn=h("button",{class:"btn sm",onclick:async()=>{
+    const body=h("div",{},loading());
+    modal({title:"Nearby networks",body,actions:[{label:"Close"}]});
+    try{const r=await api("/api/wifi/scan");const nets=(r.networks||r||[]).sort((a,b)=>(b.rssi||-999)-(a.rssi||-999));
+      body.replaceChildren(dataTable([
+        {label:"SSID",get:n=>h("b",{style:"font-weight:600"},n.ssid||"(hidden)")},
+        {label:"Signal",get:n=>{const bars=n.rssi>-55?4:n.rssi>-67?3:n.rssi>-78?2:1;return h("span",{class:"mono",style:"color:var(--primary)"},"▂▄▆█".slice(0,bars).padEnd(4,"·"));}},
+        {label:"Security",get:n=>{const a=n.auth_mode||n.auth;return a&&a!=="OPEN"?chip(a,""):chip("open","warn");}},
+        {label:"RSSI",align:"right",mono:true,get:n=>(n.rssi||"?")+" dBm"},
+      ],nets,{empty:"No networks found (device may be busy on STA)"}));
+    }catch(e){body.replaceChildren(banner("crit","alert",e.message));}}},ic("refresh"),"Scan");
+  try{
+    const wifiVals=await api("/api/settings/wifi_manager");
+    const wifiSchema=await api("/api/settings/wifi_manager/schema");
+    delete wifiVals.degraded;delete wifiVals.pending_reboot;
+    const props=Object.keys((wifiSchema&&wifiSchema.properties)||{});
+    const FB=/^fallback\d+_/;
+    const staKeys=props.filter(k=>!AP_KEYS.includes(k)&&!FB.test(k));
+    /* ONE shared values object for both wifi cards (separate copies
+       would clobber each other's staged edits) */
+    const shared={values:wifiVals,schema:wifiSchema};
+    const staBits=h("div",{});
+    const staOff=h("div",{class:"empty",style:"display:none"},"Station mode is off — set WiFi Mode to sta or apsta to join a network.");
+    const syncSta=()=>{const on=String(wifiVals.mode||"").includes("sta");
+      staBits.style.display=on?"":"none";staOff.style.display=on?"none":"";};
+    const[apRows,staRows,mdnsRows]=await Promise.all([
+      settingsForm("wifi_manager",AP_KEYS,{...shared,onDirty:syncSta,
+        advanced:["ap_ip","ap_channel","ap_bandwidth","ap_hidden",
+          "ap_max_connections","ap_auto_disable","power_save",
+          "wifi_ram_profile","wifi_static_rx","wifi_static_tx",
+          "wifi_cache_tx"],
+        visible:st=>{
+          if(!String(st.mode||"").includes("ap"))return["mode"];
+          return st.wifi_ram_profile==="custom"?null
+            :AP_KEYS.filter(k=>!k.startsWith("wifi_static_")&&k!=="wifi_cache_tx");}}),
+      settingsForm("wifi_manager",staKeys,{...shared,
+        advanced:["sta_trusted","sta_auto_reconnect","sta_max_retry",
+          "sta_roam_interval_s","hostname","sta_dns","sta_ip_mode",
+          "sta_static_ip","sta_static_netmask","sta_static_gw"],
+        visible:st=>st.sta_ip_mode==="static"?null
+          :staKeys.filter(k=>!k.startsWith("sta_static_"))}),
+      settingsForm("mdns_manager")]);
+    staBits.append(...staRows,
+      fallbackNetworks(wifiVals,()=>store.stage("wifi_manager",wifiVals)));
+    syncSta();
+    wrap.append(
+      card("WiFi / Access Point","wifi",...apRows),
+      cardTools("Station","wifi",[scanBtn],staBits,staOff),
+      card("Network Discovery","radio",...mdnsRows,
+        note("","mDNS announces the device as espnetlink_xxxx.local (service _meatpi._tcp) so apps and Home Assistant can find it without knowing the IP.")));
+  }catch(e){wrap.append(banner("crit","alert",e.message));}
+  /* Home Assistant */
+  try{
+    const haRows=await settingsForm("ha_webhooks");
+    const statsEl=h("div",{class:"rowflex",style:"flex-wrap:wrap;gap:8px;margin-top:10px"});
+    const paint=async()=>{const wh=await tryGet("/api/webhook");if(!wh)return;
+      statsEl.replaceChildren(
+        chip("OK: "+fmt.num(wh.success_count||0),"ok"),
+        chip("Fail: "+fmt.num(wh.fail_count||0),(wh.fail_count||0)>0?"crit":""),
+        h("span",{class:"help"},"Status: ",h("b",{class:"mono",style:"color:var(--text)"},wh.status||"—")),
+        wh.url?h("span",{class:"help",style:"overflow-wrap:anywhere"},"URL: ",h("b",{class:"mono",style:"color:var(--text)"},wh.url)):h("span",{class:"help"},"Not registered"));};
+    await paint();
+    wrap.append(card("Home Assistant","home",...haRows,
+      h("div",{class:"frow"},h("label",{},"WebHook Stats"),h("div",{class:"ctl"},statsEl)),
+      note("","The WebHook URL and interval are managed by the Home Assistant integration while enabled — it registers itself via POST /api/webhook.")));
+  }catch(e){wrap.append(banner("crit","alert","Home Assistant: "+e.message));}
+  return null;
+};
+
+/* ---- Cellular (LTE uplink) ---- */
+PAGES.cellular=async(view)=>{
+  const badge=chip("…","");
+  const p=page(view,null,"Cellular","LTE modem uplink — status and APN configuration.",[badge]);
+  const wrap=h("div",{style:"display:flex;flex-direction:column;gap:16px"});p.append(wrap);
+  const stEl=h("div",{});
+  async function status(){
+    const l=await tryGet("/api/lte");
+    if(!l||l.valid===false){
+      badge.className="chip";badge.replaceChildren(h("span",{class:"d"}),"unavailable");
+      stEl.replaceChildren(h("div",{class:"empty"},"Modem status unavailable — is the LTE uplink enabled?"));
+      return;
+    }
+    badge.className="chip "+(l.connected?"ok":l.attached?"warn":"");
+    badge.replaceChildren(h("span",{class:"d"}),l.connected?"Connected":(l.attached?"Attached":"Searching"));
+    /* rough RSSI → quality: -51 great … -113 none */
+    const q=l.rssi_dbm!=null?Math.min(100,Math.max(0,(l.rssi_dbm+113)/62*100)):null;
+    stEl.replaceChildren(kv([
+      ["State",l.connected?"Connected (data)":(l.attached?"Attached (no data)":"Searching for network")],
+      ["Operator",l.operator||"—"],
+      ["Network Type",l.network_type||"—"],
+      ["Signal",l.rssi_dbm!=null?l.rssi_dbm+" dBm":"—"],
+      ["IP Address",l.ip||"—"]]),
+      q!=null?h("div",{style:"margin-top:12px"},meter(q,100,q<25?"crit":q<50?"warn":"ok")):null);
+  }
+  await status();
+  wrap.append(cardTools("Uplink Status","radio",
+    [h("button",{class:"btn sm gh",onclick:status},ic("refresh"))],stEl,
+    note("","The LTE modem provides the internet uplink (PPPoS). WiFi station and LTE can coexist; routing prefers the configured default.")));
+  try{
+    const rows=await settingsForm("lte_upstream_pppos");
+    wrap.append(card("Modem Settings","settings",...rows,
+      note("","APN credentials come from your SIM provider; leave user/password empty unless the carrier requires them. Changes apply after Submit + restart.")));
+  }catch(e){wrap.append(banner("crit","alert",e.message));}
+  const t=setInterval(()=>{if(conn.state==="online")status();},5000);return()=>clearInterval(t);
+};
+
+/* ---- GPS ---- */
+PAGES.gps=async(view)=>{
+  const badge=chip("…","");
+  const p=page(view,null,"GPS","GNSS receiver — live fix and constellation settings.",[badge]);
+  const wrap=h("div",{style:"display:flex;flex-direction:column;gap:16px"});p.append(wrap);
+  const stEl=h("div",{});
+  async function status(){
+    const g=await tryGet("/api/gps");
+    if(!g||g.valid===false){
+      badge.className="chip";badge.replaceChildren(h("span",{class:"d"}),"unavailable");
+      stEl.replaceChildren(h("div",{class:"empty"},"Receiver status unavailable — is GPS enabled?"));
+      return;
+    }
+    badge.className="chip "+(g.fix?"ok":"warn");
+    badge.replaceChildren(h("span",{class:"d"}),g.fix?"Fix":"No fix");
+    stEl.replaceChildren(kv([
+      ["Fix",g.fix?("Yes"+(g.fix_type?" ("+g.fix_type+")":"")):"No"],
+      ["Quality",g.fix_quality!=null?String(g.fix_quality):"—"],
+      ["Satellites",(g.satellites??"—")+" tracked / "+(g.sats_in_view??"—")+" in view"],
+      ["Position",g.fix&&g.latitude!=null?h("code",{},g.latitude.toFixed(6)+", "+g.longitude.toFixed(6)):"—"],
+      ["Altitude",g.fix&&g.altitude_m!=null?g.altitude_m.toFixed(1)+" m":"—"],
+      ["Speed",g.fix&&g.speed_kmph!=null?g.speed_kmph.toFixed(1)+" km/h":"—"],
+      ["Course",g.fix&&g.course_deg!=null?g.course_deg.toFixed(0)+" °":"—"],
+      ["HDOP",g.hdop!=null?g.hdop.toFixed(1):"—"],
+      ["Age",g.age_ms!=null?(g.age_ms/1000).toFixed(1)+" s":"—"]]));
+  }
+  await status();
+  wrap.append(cardTools("Fix","mappin",
+    [h("button",{class:"btn sm gh",onclick:status},ic("refresh"))],stEl));
+  try{
+    const rows=await settingsForm("gps",null,{advanced:["passthru","uart0_out","cli"]});
+    wrap.append(card("Receiver Settings","settings",...rows,
+      note("","AGNSS (assisted GNSS) speeds up the first fix using downloaded ephemeris; constellation choice trades fix speed against power. Changes apply after Submit + restart.")));
+  }catch(e){wrap.append(banner("crit","alert",e.message));}
+  const t=setInterval(()=>{if(conn.state==="online")status();},2000);return()=>clearInterval(t);
+};
+
+/* ---- VPN ---- */
+PAGES.vpn=async(view)=>{
+  const badge=chip("…","");
+  const p=page(view,null,"VPN","WireGuard / Tailscale tunnel for secure remote access.",[badge]);
+  const wrap=h("div",{style:"display:flex;flex-direction:column;gap:16px"});p.append(wrap);
+  const dbgRows=h("div",{});
+  const peersCard=h("div",{style:"display:none"});
+  async function status(){const v=await tryGet("/api/vpn");if(!v)return;
+    badge.className="chip "+(v.state==="connected"?"ok":v.state==="disabled"?"":"warn");
+    badge.replaceChildren(h("span",{class:"d"}),v.state==="connected"?"Connected":(v.state||"disabled"));
+    dbgRows.replaceChildren(kv([
+      ["Type",v.type||"—"],["State",v.state||"—"],["Endpoint",v.endpoint||"—"],
+      ["Tailscale IP",v.ts_ip||"—"],["Peers",v.ts_peers],["Connects",v.connects],
+      ["Failures",v.failures],["Uptime",fmt.dur(v.uptime_s)]]));
+    if(v.peers&&v.peers.length){
+      peersCard.style.display="";
+      peersCard.replaceChildren(card("Tailscale Peers","users",dataTable([
+        {label:"Hostname",get:x=>h("b",{style:"font-weight:600"},x.hostname||"—")},
+        {label:"IP",mono:true,get:x=>x.ip||"—"},
+        {label:"State",get:x=>x.online?chip("online","ok"):chip("offline","")},
+        {label:"Path",get:x=>x.path?chip(x.path,x.path==="direct"?"info":""):"—"},
+      ],v.peers)));
+    }else peersCard.style.display="none";
+  }
+  await status();
+  try{
+    const vals=await api("/api/settings/vpn_manager");
+    const schema=await api("/api/settings/vpn_manager/schema");
+    delete vals.degraded;delete vals.pending_reboot;
+    const WG=["private_key","peer_public_key","preshared_key","address","allowed_ip","allowed_ip_mask","endpoint","port","keepalive_s","default_route","dns"];
+    const TS=["ts_auth_key","ts_device_name","ts_control_url"];
+    const keyOut=h("div",{class:"help mono",style:"display:none;word-break:break-all;margin-top:6px"});
+    const keyRow=h("div",{class:"frow"},h("label",{},"Key Pair"),h("div",{class:"ctl"},
+      h("button",{class:"btn sm",type:"button",onclick:async e=>{
+        if(!await confirmModal("Generate a new WireGuard key pair on the device? The old key stops working after restart."))return;
+        e.target.disabled=true;
+        try{const r=await api("/api/vpn/keygen",{method:"POST"});keyOut.textContent="Public key: "+r.public_key;keyOut.style.display="block";toast("Key stored — applies after restart","ok");}
+        catch(err){toast(err.message,"err");}
+        e.target.disabled=false;}},ic("key"),"Generate Keys"),
+      h("div",{class:"help"},"The private key never leaves the device."),keyOut));
+    const impRow=h("div",{class:"frow"},h("label",{},"Import .conf"),h("div",{class:"ctl"},
+      h("label",{class:"btn sm"},ic("up"),"Upload wg-quick .conf",
+        h("input",{type:"file",accept:".conf,.txt",style:"display:none",onchange:async e=>{
+          const f=e.target.files[0];if(!f)return;
+          try{const n=importWgConf(await f.text(),vals);
+            vals.enabled=true;vals.type="wireguard";
+            store.stage("vpn_manager",vals);
+            rows.load();rows.sync();syncKey();
+            toast("Imported "+n+" fields — review, then Submit Changes","ok");}
+          catch(err){toast("Import failed: "+err.message,"err");}
+          e.target.value="";}})),
+      h("div",{class:"help"},"Standard wg-quick file — [Interface]/[Peer] keys map onto the fields below. Tailscale needs no file: just the auth key.")));
+    const syncKey=()=>{const wg=vals.enabled&&vals.type!=="tailscale";
+      keyRow.style.display=wg?"":"none";impRow.style.display=wg?"":"none";};
+    /* ONE mode dropdown: Disabled / WireGuard / Tailscale — only the
+       selected backend's fields show */
+    const rows=await settingsForm("vpn_manager",[...WG,...TS,"cli"],{values:vals,schema,onDirty:syncKey,
+      visible:st=>!st.enabled?[]:(st.type==="tailscale"?[...TS,"cli"]:[...WG,"cli"])});
+    const mode=()=>vals.enabled?(vals.type==="tailscale"?"tailscale":"wireguard"):"disabled";
+    const modeSel=h("select",{onchange:e=>{const v=e.target.value;
+      vals.enabled=v!=="disabled";if(v!=="disabled")vals.type=v;
+      store.stage("vpn_manager",vals);rows.sync();syncKey();}},
+      ...[["disabled","Disabled"],["wireguard","WireGuard"],["tailscale","Tailscale"]]
+        .map(([v,l])=>h("option",{value:v,selected:v===mode()},l)));
+    const modeRow=h("div",{class:"frow"},h("label",{},"VPN"),h("div",{class:"ctl"},modeSel),
+      h("div",{class:"help"},"WireGuard: point-to-point tunnel to your own server. Tailscale: zero-config mesh (needs an auth key)."));
+    syncKey();
+    wrap.append(
+      card("VPN Settings","shield",modeRow,impRow,...rows,keyRow),
+      peersCard,
+      card("VPN Debug","bug",
+        h("div",{class:"rowflex",style:"gap:10px;margin-bottom:6px;flex-wrap:wrap"},
+          h("button",{class:"btn sm",onclick:status},ic("refresh"),"Refresh")),
+        dbgRows));
+  }catch(e){wrap.append(banner("crit","alert",e.message));}
+  const t=setInterval(()=>{if(conn.state==="online")status();},5000);return()=>clearInterval(t);
+};
+
+/* ---- Advanced ---- */
+PAGES.advanced=async(view)=>{
+  const p=page(view,null,"Advanced","Motion detection and console access.");
+  const wrap=h("div",{style:"display:flex;flex-direction:column;gap:16px"});p.append(wrap);
+  const blocks=[["Motion (IMU)","activity","imu_manager"],
+    ["Console","terminal","cmdline_manager"],
+    ["USB Console","terminal","usb_cli_console"]];
+  for(const[title,icon,comp]of blocks){
+    try{const rows=await settingsForm(comp);
+      if(rows.length)wrap.append(card(title,icon,...rows));}
+    catch{/* component absent in this build */}
+  }
+  wrap.append(note("warn","These settings affect wake-up sensitivity and console availability. Change them only if you know the effect; every field applies after Submit + reboot."));
+  return null;
+};
+
+/* ---- System ---- */
+/* ---- Certificates (cert_manager sets; key material is write-only) ---- */
+async function certsCard(){
+  const listEl=h("div",{});
+  const refresh=async()=>{
+    try{const r=await api("/api/certs");
+      listEl.replaceChildren(dataTable([
+        {label:"Name",get:s=>h("b",{class:"mono",style:"font-weight:600"},s.name)},
+        {label:"CA",get:s=>s.ca?chip("yes","ok"):h("span",{class:"help"},"—")},
+        {label:"Client Cert",get:s=>s.cert?chip("yes","ok"):h("span",{class:"help"},"—")},
+        {label:"Client Key",get:s=>s.key?chip("yes","ok"):h("span",{class:"help"},"—")},
+        {label:"",align:"right",get:s=>h("button",{class:"btn sm gh danger",onclick:async()=>{
+          if(!await confirmModal("Delete certificate set \""+s.name+"\"? Consumers referencing it fall back to the built-in CA bundle at the next connection.","Delete set"))return;
+          try{await api("/api/certs?set="+encodeURIComponent(s.name),{method:"DELETE"});toast("Deleted","ok");refresh();}
+          catch(e){toast(e.message,"err");}}},ic("trash"))}
+      ],r.sets||[],{empty:"No certificate sets yet — upload one below."}));
+    }catch(e){listEl.replaceChildren(banner("crit","alert",e.message));}
+  };
+  await refresh();
+  const name=h("input",{type:"text",maxlength:24,placeholder:"e.g. home_broker",style:"max-width:220px"});
+  const files={},resets=[];
+  const pickBtn=(type,label)=>{
+    const cap=h("span",{},label);
+    resets.push(()=>{cap.textContent=label;delete files[type];});
+    return h("label",{class:"btn sm"},cap,
+      h("input",{type:"file",accept:".pem,.crt,.cer,.key,.txt",style:"display:none",onchange:e=>{
+        files[type]=e.target.files[0]||null;
+        cap.textContent=files[type]?files[type].name:label;e.target.value="";}}));};
+  const upBtn=h("button",{class:"btn pri sm",onclick:async()=>{
+    const n=(name.value||"").trim();
+    if(!/^[a-z0-9_-]{1,24}$/.test(n))return toast("Set name: 1-24 chars, a-z 0-9 - _","err");
+    const parts=["ca","cert","key"].filter(t=>files[t]);
+    if(!parts.length)return toast("Choose at least one PEM file","err");
+    upBtn.disabled=true;
+    try{
+      for(const t of parts){ /* raw body — bypasses the api() JSON wrapper */
+        const res=await fetch(API+"/api/certs/upload?set="+encodeURIComponent(n)+"&type="+t,
+          {method:"POST",body:await files[t].text()});
+        if(!res.ok){let m="HTTP "+res.status;try{m=(await res.json()).error||m;}catch{}
+          throw new Error(t+": "+m);}
+      }
+      toast("Uploaded "+parts.length+" part"+(parts.length>1?"s":"")+" to \""+n+"\"","ok");
+      name.value="";resets.forEach(f=>f());refresh();
+    }catch(e){toast("Upload failed — "+e.message,"err");}
+    upBtn.disabled=false;}},ic("upload"),"Upload");
+  return card("Certificates","shield",listEl,
+    h("div",{style:"border-top:1px solid var(--border);margin:14px 0 12px"}),
+    h("div",{class:"frow"},h("label",{},"Set Name"),h("div",{class:"ctl"},name),
+      h("div",{class:"help"},"New name creates a set; an existing name replaces the uploaded parts.")),
+    h("div",{class:"frow"},h("label",{},"PEM Files"),h("div",{class:"ctl"},
+      h("div",{class:"rowflex",style:"flex-wrap:wrap;gap:8px"},
+        pickBtn("ca","CA certificate…"),pickBtn("cert","Client certificate…"),pickBtn("key","Client key…"),upBtn)),
+      h("div",{class:"help"},"Any subset per upload, 8 KB max per part. A set needs at least a CA to verify servers; add BOTH client certificate and key for mutual TLS.")),
+    note("","Up to 10 named sets, stored under /data/certs. Key material can never be read back through this page or the API. Changes take effect on the next connection (reboot to be sure)."));
+}
+
+PAGES.system=async(view)=>{
+  const p=page(view,null,"System","Maintenance, certificates, configuration backup and firmware updates.");
+  const wrap=h("div",{style:"display:flex;flex-direction:column;gap:16px"});p.append(wrap);
+  const histEl=h("div",{});
+  const histBtn=h("button",{class:"btn sm",onclick:async()=>{
+    const hist=await tryGet("/api/restart/history");
+    modal({title:"Restart history",body:hist&&hist.records?dataTable([
+      {label:"#",key:"seq"},{label:"Reason",key:"reason"},
+      {label:"Type",get:r=>r.planned?chip(r.planned_reason||"planned","info"):chip("unexpected","warn")},
+      {label:"Source",mono:true,key:"source"}],hist.records.slice(0,12)):h("p",{},"—"),
+      actions:[{label:"Close"}]});}},"Restart History");
+  wrap.append(card("Maintenance","refresh",
+    h("div",{class:"rowflex",style:"flex-wrap:wrap;gap:10px"},
+      h("button",{class:"btn sm",onclick:async()=>{if(await confirmModal("Restart ESPNetLink now?","Reboot")){try{await api("/api/restart",{method:"POST"});}catch{}expectReboot("Restarting");}},},ic("refresh"),"Reboot"),
+      h("a",{class:"btn sm",href:API+"/api/settings/backup",download:"espnetlink-settings.json"},ic("download"),"Download Config"),
+      h("label",{class:"btn sm"},ic("upload"),"Upload Config",
+        h("input",{type:"file",accept:".json",style:"display:none",onchange:async e=>{
+          const f=e.target.files[0];if(!f)return;
+          try{const body=JSON.parse(await f.text());const r=await api("/api/settings/backup",{method:"POST",body});
+            toast("Restored","ok");if(r&&r.reboot!==false)expectReboot("Applying backup");}
+          catch(err){toast("Restore failed: "+err.message,"err");}e.target.value="";}})),
+      histBtn,
+      h("button",{class:"btn sm danger",onclick:async()=>{
+        const c=await promptModal('Type "factory-reset" to confirm — wipes ALL settings to defaults (files kept)');
+        if(c!=="factory-reset")return;
+        try{await api("/api/settings/factory_reset",{method:"POST",body:{confirm:"factory-reset"}});expectReboot("Factory reset");}
+        catch(e2){toast(e2.message,"err");}}},"Factory Reset")),histEl));
+  try{wrap.append(await certsCard());}
+  catch(e){wrap.append(banner("crit","alert","Certificates: "+e.message));}
+  /* firmware / OTA */
+  const st=conn.status||await tryGet("/api/status")||{};
+  const otaFile=h("input",{type:"file",accept:".bin",style:"display:none"});
+  const fileBtn=h("label",{class:"btn sm"},"Choose File",otaFile);
+  const flashBtn=h("button",{class:"btn pri sm",disabled:true},"Flash Firmware");
+  const prog=h("div",{style:"display:none;margin-top:16px"},
+    h("div",{style:"height:10px;background:var(--surface-3);border-radius:6px;overflow:hidden"},h("i",{style:"display:block;height:100%;width:0;background:var(--primary);border-radius:6px;transition:width .25s"})),
+    h("div",{class:"mono help",style:"margin-top:7px"},""));
+  let picked=null;
+  otaFile.onchange=()=>{picked=otaFile.files[0]||null;
+    fileBtn.firstChild.textContent=picked?picked.name:"Choose File";flashBtn.disabled=!picked;};
+  flashBtn.onclick=async()=>{
+    if(!picked)return;
+    if(!await confirmModal("Flash \""+picked.name+"\"? The device verifies the image, writes the inactive slot, and reboots into it.","Firmware update"))return;
+    flashBtn.disabled=true;prog.style.display="block";
+    const bar=prog.querySelector("i"),msg=prog.lastChild;
+    msg.textContent="Uploading…";
+    try{await new Promise((res,rej)=>{const x=new XMLHttpRequest();x.open("POST",API+"/api/ota/upload");
+      x.upload.onprogress=e=>{if(e.lengthComputable){const pc=(e.loaded/e.total*100);bar.style.width=pc.toFixed(0)+"%";msg.textContent="Flashing... "+pc.toFixed(0)+"%";}};
+      x.onload=()=>x.status<400?res():rej(new Error("HTTP "+x.status));x.onerror=()=>rej(new Error("network error"));
+      x.setRequestHeader("Content-Type","application/octet-stream");x.send(picked);});
+      bar.style.width="100%";bar.style.background="var(--success)";msg.textContent="Complete — verifying & rebooting";
+      expectReboot("Installing firmware");}
+    catch(e){msg.textContent="Failed: "+e.message;msg.style.color="var(--danger)";flashBtn.disabled=false;}};
+  wrap.append(card("Firmware Update","upload",
+    h("div",{style:"display:flex;align-items:center;justify-content:space-between;padding:11px 13px;background:var(--surface-2);border:1px solid var(--border);border-radius:9px;margin-bottom:14px"},
+      h("div",{},h("div",{style:"font-size:13px;color:var(--text-2)"},"Installed"),h("div",{class:"mono",style:"font-weight:700"},st.version||"—")),
+      h("div",{style:"text-align:right"},h("div",{style:"font-size:13px;color:var(--text-2)"},"Partition"),h("div",{class:"mono",style:"font-weight:700"},st.partition||"—"))),
+    h("div",{class:"drop"},
+      h("div",{style:"font-size:13.5px;color:var(--text-2);margin-bottom:10px"},"Select a firmware ",h("b",{class:"mono"},".bin")," file to flash."),
+      h("div",{style:"display:flex;gap:10px;justify-content:center"},fileBtn,flashBtn),prog),
+    h("div",{style:"margin-top:12px;font-size:12px;color:var(--text-3)"},"Do not power off the device during a firmware update. Releases: ",
+      h("a",{href:"https://github.com/meatpiHQ/espnetlink-fw/releases",target:"_blank"},"github.com/meatpiHQ/espnetlink-fw"))));
+  return null;
+};
+
+/* ---- About ---- */
+PAGES.about=async(view)=>{
+  const p=page(view,null,"About","Device and firmware information.");
+  const wrap=h("div",{});p.append(wrap);
+  const[st,info,imu]=await Promise.all([tryGet("/api/status"),tryGet("/api/info"),tryGet("/api/imu")]);
+  wrap.append(card(null,null,
+    h("div",{style:"display:flex;align-items:center;gap:14px;margin-bottom:18px"},
+      h("div",{style:"width:52px;height:52px;border-radius:13px;background:var(--primary-tint);display:flex;align-items:center;justify-content:center;flex:none",
+        html:'<svg width="38" height="38" viewBox="0 0 32 32"><path d="M5 20 L11 12 L16 20 L21 12 L27 20" fill="none" stroke="#46d2eb" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>'}),
+      h("div",{},h("div",{style:"font-size:19px;font-weight:800"},"ESPNETLINK"))),
+    st?kv([
+      ["Model",(info&&info.model)||"ESPNetLink"],
+      ["Firmware Version",st.version||"—"],
+      ["Hardware",(info&&info.hw_version)||"—"],
+      ["Device ID",(info&&info.device_id)||"—"],
+      ["MAC",(info&&info.mac)||"—"],
+      ["API Level",info&&info.api_level],
+      ["Partition",st.partition||"—"],
+      ["Uptime",st.uptime||"—"],
+      ["Boot Count",st.boot_count],
+      ["IMU",imu?(imu.activity+(imu.temp!=null?" · "+imu.temp+" °C":"")):"—"]]):h("div",{class:"empty"},"—"),
+    h("div",{style:"margin-top:16px;font-size:12.5px;color:var(--text-3)"},"Designed by ",h("a",{href:"https://www.meatpi.com",target:"_blank"},"meatpi.com"),
+      " · Source & releases: ",h("a",{href:"https://github.com/meatpiHQ/espnetlink-fw",target:"_blank"},"github.com/meatpiHQ/espnetlink-fw"))));
+  return null;
+};
+
+/* ================= TOOLS ================= */
+/* ---- Files ---- */
+PAGES.files=async(view)=>{
+  const p=page(view,null,"Files","On-device filesystem");
+  let path="/data";
+  const crumbEl=h("div",{class:"rowflex",style:"gap:5px;flex-wrap:wrap"});const listWrap=h("div",{});
+  const mk=h("button",{class:"btn sm",onclick:async()=>{const n=await promptModal("New folder name");if(!n)return;try{await api("/api/fs/mkdir",{method:"POST",body:{path:path+"/"+n}});toast("Created","ok");load();}catch(e){toast(e.message,"err");}}},ic("plus"),"New folder");
+  const up=h("label",{class:"btn sm"},ic("up"),"Upload",h("input",{type:"file",style:"display:none",onchange:e=>doUpload(e.target.files[0])}));
+  p.append(h("div",{class:"rowflex",style:"gap:10px"},crumbEl,h("span",{class:"grow"}),mk,up,h("button",{class:"btn sm gh",onclick:()=>load()},ic("refresh"))),section(null,null,listWrap));
+  function setCrumb(){const parts=path.split("/").filter(Boolean);const els=[h("a",{href:"#",onclick:e=>{e.preventDefault();path="/";load();}},"root")];let acc="";parts.forEach(x=>{acc+="/"+x;const cur=acc;els.push(h("span",{class:"dim"},"/"),h("a",{href:"#",onclick:e=>{e.preventDefault();path=cur;load();}},x));});crumbEl.replaceChildren(...els);}
+  async function doUpload(f){if(!f)return;const fd=new FormData();fd.append("file",f,f.name);
+    try{await api("/api/fs/upload?path="+encodeURIComponent(path+"/"+f.name),{method:"POST",body:fd});toast("Uploaded "+f.name,"ok");load();}
+    catch(e){try{await api("/api/fs/upload?path="+encodeURIComponent(path+"/"+f.name),{method:"POST",body:await f.arrayBuffer(),headers:{"Content-Type":"application/octet-stream"}});toast("Uploaded","ok");load();}catch(e2){toast("Upload failed: "+e2.message,"err");}}}
+  async function load(){setCrumb();listWrap.replaceChildren(loading());
+    try{const r=await api("/api/fs/list?path="+encodeURIComponent(path));const ents=(r.entries||[]).sort((a,b)=>(b.dir?1:0)-(a.dir?1:0)||a.name.localeCompare(b.name));
+      const rows=[];if(path!=="/"&&path!=="")rows.push({up:true});rows.push(...ents);
+      listWrap.replaceChildren(dataTable([
+        {label:"Name",get:e=>e.up?h("a",{href:"#",onclick:ev=>{ev.preventDefault();path=path.split("/").slice(0,-1).join("/")||"/";load();}},"⬑ up a level"):
+          e.dir?h("a",{href:"#",onclick:ev=>{ev.preventDefault();path=path.replace(/\/$/,"")+"/"+e.name;load();}},ic("folder"),h("span",{style:"margin-left:6px"},e.name)):h("span",{},h("span",{class:"dim"},"·"),h("span",{style:"margin-left:8px"},e.name))},
+        {label:"Size",align:"right",get:e=>e.up?"":e.dir?"—":fmt.bytes(e.size)},
+        {label:"",get:e=>e.up||e.dir?"":h("div",{class:"rowflex",style:"justify-content:flex-end;gap:6px"},
+          h("a",{class:"btn sm gh",href:API+"/api/fs/download?path="+encodeURIComponent(path.replace(/\/$/,"")+"/"+e.name),download:e.name},ic("down")),
+          h("button",{class:"btn sm gh danger",onclick:async()=>{if(!await confirmModal("Delete "+e.name+"?"))return;try{await api("/api/fs/file?path="+encodeURIComponent(path.replace(/\/$/,"")+"/"+e.name),{method:"DELETE"});toast("Deleted","ok");load();}catch(err){toast(err.message,"err");}}},ic("trash")))}
+      ],rows,{empty:"empty folder"}));
+    }catch(e){listWrap.replaceChildren(banner("crit","alert",e.message));}}
+  await load();return null;
+};
+
+/* ---- Logs ---- */
+PAGES.logs=async(view)=>{
+  const p=page(view,null,"Logs","Device log ring and sinks");
+  const tag=h("input",{value:"*",style:"max-width:150px"});const lvl=h("select",{},...["error","warn","info","debug","verbose"].map(l=>h("option",{value:l,selected:l==="info"},l)));
+  const auto=h("input",{type:"checkbox",checked:true});const sinks=h("div",{class:"rowflex",style:"gap:8px"});
+  const out=h("div",{class:"console"});
+  p.append(section("Controls",null,
+    h("div",{class:"rowflex",style:"gap:10px;flex-wrap:wrap"},tag,lvl,h("button",{class:"btn sm",onclick:async()=>{try{await api("/api/logs/level",{method:"PUT",body:{tag:tag.value||"*",level:lvl.value}});toast("Level set","ok");}catch(e){toast(e.message,"err");}}},"Set level"),
+      h("span",{class:"grow"}),h("label",{class:"rowflex",style:"gap:6px;font-size:12px;color:var(--text-2)"},auto,"auto-scroll"),
+      h("a",{class:"btn sm gh",href:API+"/api/logs/ring",download:"espnetlink-log.txt"},ic("down"),"Download"),
+      h("button",{class:"btn sm gh danger",onclick:async()=>{try{await api("/api/logs/ring",{method:"DELETE"});out.replaceChildren();toast("Cleared","ok");}catch(e){toast(e.message,"err");}}},ic("trash"),"Clear")),
+    h("div",{style:"margin-top:10px"},sinks)),out);
+  const ANSI=/\x1b\[[0-9;]*m/g;
+  async function ring(){try{const txt=await api("/api/logs/ring");out.replaceChildren(...String(txt).replace(ANSI,"").split("\n").map(l=>h("div",{class:/ E \(|abort|error|fail/i.test(l)?"er":/ W \(|warn/i.test(l)?"wn":/---- boot|reset/i.test(l)?"dim":""},l)));if(auto.checked)out.scrollTop=out.scrollHeight;}catch{}}
+  async function sink(){const s2=await tryGet("/api/logs/status");if(!s2)return;sinks.replaceChildren(h("span",{class:"help"},"dropped "+s2.dropped+" · sinks:"),...(s2.sinks||[]).map(k=>h("button",{class:"chip "+(k.enabled?"ok":""),style:"cursor:pointer;border:none",onclick:async()=>{try{await api("/api/logs/sink",{method:"PUT",body:{name:k.name,enabled:!k.enabled}});sink();}catch(e){toast(e.message,"err");}}},h("span",{class:"d"}),k.name)));}
+  await sink();await ring();const t=setInterval(()=>{if(conn.state==="online")ring();},2500);return()=>clearInterval(t);
+};
+
+/* ---- System Monitor (tasks / CPU / heap / temperature) ---- */
+PAGES.sysmon=async(view)=>{
+  const p=page(view,null,"System Monitor","Live tasks, CPU load, heap and die temperature");
+  p.classList.add("wide");
+  const tilesEl=h("div",{class:"tiles"});
+  const heapEl=h("div",{style:"display:grid;grid-template-columns:1fr 1fr;gap:16px"});
+  const taskEl=h("div",{});
+  p.append(tilesEl,heapEl,taskEl);
+  let prev=null;
+  async function refresh(){
+    const[st,tk]=await Promise.all([tryGet("/api/status"),tryGet("/api/status/tasks")]);
+    if(!st||!tk||!tk.tasks)return;
+    const map=new Map(tk.tasks.map(x=>[x.name,x.runtime_us]));
+    let rows=tk.tasks.map(x=>({...x,cpu:null}));
+    let busy=null;
+    if(prev&&tk.total_us>prev.total_us){
+      const win=(tk.total_us-prev.total_us)*(tk.cores||2);
+      let idle=0;
+      rows=tk.tasks.map(x=>{const p0=prev.map.get(x.name);
+        const d=p0!=null?Math.max(0,x.runtime_us-p0):0;
+        if(/^IDLE/.test(x.name))idle+=d;
+        return{...x,cpu:win>0?d/win*100:0};});
+      busy=win>0?Math.max(0,100-idle/win*100):null;
+    }
+    prev={total_us:tk.total_us,map};
+    rows.sort((a,b)=>((b.cpu??0)-(a.cpu??0))||(a.stack_hw-b.stack_hw));
+    const m=st.memory;
+    tilesEl.replaceChildren(
+      tile("CPU load",busy==null?"…":busy.toFixed(1),"%",{kind:busy>85?"crit":busy>60?"warn":""}),
+      tile("Tasks",rows.length,null),
+      tile("Internal free",m?fmt.bytes(m.internal.free):"—",null,{cap:m?"min ever "+fmt.bytes(m.internal.min_free):null,kind:m&&m.internal.free<20480?"crit":m&&m.internal.free<40960?"warn":""}),
+      tile("Die temp",st.temp_c!=null?st.temp_c.toFixed(1):"—","°C",{kind:st.temp_c>75?"crit":st.temp_c>60?"warn":""}));
+    if(m)heapEl.replaceChildren(...[["Internal RAM","the scarce heap — radio stacks live here",m.internal],["PSRAM","bulk heap",m.psram]].map(([label,desc,hp])=>
+      section(label,desc,
+        meter(hp.total-hp.free,hp.total),
+        kv([["In use",fmt.bytes(hp.total-hp.free)+" of "+fmt.bytes(hp.total)],["Free now",fmt.bytes(hp.free)],["Lowest ever",fmt.bytes(hp.min_free)],["Largest free block",fmt.bytes(hp.largest_block)]]))));
+    const STATE={X:["running","ok"],R:["ready","ok"],B:["blocked",""],S:["suspended","warn"],D:["deleted","crit"]};
+    taskEl.replaceChildren(section("Tasks","stack headroom = bytes NEVER used (small = near overflow); CPU % measured between refreshes",
+      dataTable([
+        {label:"Task",key:"name",mono:true},
+        {label:"State",get:r=>{const s2=STATE[r.state]||[r.state,""];return chip(s2[0],s2[1]);}},
+        {label:"Core",get:r=>r.core<0?"any":String(r.core),align:"right"},
+        {label:"Prio",key:"prio",align:"right"},
+        {label:"Stack headroom",get:r=>r.stack_hw<512?chip(fmt.bytes(r.stack_hw),r.stack_hw<256?"crit":"warn"):fmt.bytes(r.stack_hw),align:"right",mono:true},
+        {label:"CPU %",get:r=>r.cpu==null?"…":(r.cpu>0&&r.cpu<0.05?"<0.1":r.cpu.toFixed(1)),align:"right",mono:true},
+      ],rows)));
+  }
+  await refresh();const t=setInterval(()=>{if(conn.state==="online")refresh();},2000);return()=>clearInterval(t);
+};
+
+/* ---- All Settings ---- */
+PAGES.allsettings=async(view)=>{
+  const p=page(view,null,"All Settings","Every component — forms generated from the device schema");
+  p.classList.add("wide");
+  let comps=[];try{const r=await api("/api/settings");comps=(r.components||r).filter(c=>!HIDE.has(c.name));}catch(e){p.append(banner("crit","alert","Cannot list settings: "+e.message));return null;}
+  comps.sort((a,b)=>niceName(a.name).localeCompare(niceName(b.name)));
+  const acc=h("div",{style:"display:flex;flex-direction:column;gap:10px"});p.append(acc);
+  for(const c of comps){
+    const body=h("div",{style:"display:none;padding:2px 22px 14px"});let loaded=false;
+    const head=h("button",{class:"legend",style:"width:100%;border:none;background:transparent;cursor:pointer;text-align:left;padding:14px 22px",onclick:async()=>{const open=body.style.display!=="none";body.style.display=open?"none":"block";head.querySelector(".chev").textContent=open?"▾":"▴";if(!open&&!loaded){loaded=true;body.replaceChildren(loading());try{const rows=await settingsForm(c.name);body.replaceChildren(...(rows.length?rows:[h("div",{class:"empty"},"no configurable fields")]));}catch(e){body.replaceChildren(banner("crit","alert",e.message));}}}},
+      h("h3",{},niceName(c.name)),c.degraded?chip("check settings","crit"):null,c.pending_reboot?chip("restart pending","warn"):null,
+      h("span",{class:"grow"}),h("code",{style:"color:var(--text-3);font-size:11px"},c.name),h("span",{class:"chev",style:"color:var(--text-3)"},"▾"));
+    acc.append(h("div",{class:"section"},head,body));
+  }
+  return null;
+};
+/* ============================================================ BOOT */
+const NICE={wifi_manager:"Wi-Fi",mdns_manager:"mDNS",vpn_manager:"VPN",
+  lte_upstream_pppos:"Cellular (LTE)",gps:"GPS / GNSS",imu_manager:"Motion (IMU)",
+  ha_webhooks:"Home Assistant",cert_manager:"Certificates",log_manager:"Logging",
+  dev_status_manager:"Status flags",restart_tracker:"Restart tracking",
+  cmdline_manager:"Console",usb_cli_console:"USB console",filesystem:"Filesystem",
+  system:"System"};
+const HIDE=new Set(["main_bench"]);
+function niceName(n){return NICE[n]||n.replace(/_manager$/,"").replaceAll("_"," ").replace(/\b\w/g,c=>c.toUpperCase());}
+async function boot(){
+  conn.settings=(await tryGet("/api/settings"))?.components||[];
+  conn.info=await tryGet("/api/info");
+  renderSubmit();
+  await ping();route();
+}
+boot();
+</script>
 </body>
 </html>

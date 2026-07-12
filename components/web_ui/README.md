@@ -1,72 +1,70 @@
 # web_ui
 
-The built-in web app. **API-first (§1b): it is just another client** —
-every screen works exclusively through the documented `/api` + `/ws`
-surfaces; nothing here has a privileged path.
+The built-in web app — a self-contained, responsive **single-page
+application** in the WiCAN Pro "v2" design (ported 2026-07-12 from
+`wican-fw-v6/components/web_ui_v2`, adapted to ESPNetLink's feature set).
+**API-first (§1b): it is just another client** — every screen works
+exclusively through the documented `/api` surface
+(`components/HTTP_API.md`); nothing here has a privileged path.
+
+One file (`web/index.html`), zero dependencies (no framework, no CDN —
+the JetBrains Mono stack falls back to system monospace). Gzipped at
+build time by `gen_assets.py` into `web_ui_gen.c` and served by the
+http_server_manager catch-all at `/` and `/index.html`.
+
+## Design (WiCAN Pro, 2026-07-10)
+
+- **Shell**: 58 px header — meatpi logo + ESPNetLink wordmark ·
+  connection pill (pulse dot, `ESPNetLink_XXXX` from `/api/info`
+  device_id, IP, AP/STA/USB tag) · theme toggle · a header **Submit
+  Changes** button that batches settings PUTs + `POST
+  /api/settings/submit` (reboot-to-apply §4.2, incl. the
+  unsaved-changes guard).
+- **Nav**: DEVICE group + TOOLS group; a warning card at the bottom
+  surfaces degraded / restart-pending components. Wraps to a chip row
+  ≤ 860 px; tables become stacked cards ≤ 640 px (`.rtable`).
+- **Connection watchdog**: 3 s `/api/status` poll drives the pill,
+  offline/reboot banners, and page re-render on reconnect —
+  `expectReboot(reason)` covers settings apply, OTA, restore, factory
+  reset. Nobody ever refreshes the page manually.
+- **Theme**: light default, full dark theme, follows the OS + manual
+  toggle (persisted, `espnetlink-theme`).
+- **Schema-driven settings**: forms are generated from
+  `GET /api/settings/<name>/schema` — new firmware fields appear with
+  no UI change. Progressive disclosure (enable-gate + per-card "Show
+  advanced"); `cli` keys are always advanced.
+
+## Pages
+
+DEVICE: **Status** (Connection / LTE / GPS / Uptime tiles +
+network/system tables) · **Settings** (WiFi AP · Station w/ scan +
+backup networks · mDNS · Home Assistant w/ webhook stats) ·
+**Cellular** (`/api/lte` status + `lte_upstream_pppos` APN form) ·
+**GPS** (`/api/gps` fix + `gps` AGNSS/constellation form) · **VPN**
+(mode dropdown Disabled/WireGuard/Tailscale · wg-quick .conf import ·
+on-device keygen · Tailscale peers table · debug) · **Advanced** (IMU ·
+consoles) · **System** (reboot · backup/restore · restart history ·
+factory reset · **Certificates** (cert_manager sets; per-part PEM
+upload via raw `/api/certs/upload?set&type` — NOT the api() JSON
+wrapper; key material is write-only) · OTA with progress) · **About**.
+TOOLS: **Files** (`/api/fs/*`, /data) · **Logs** (crash ring + levels +
+sinks) · **System Monitor** (tasks/CPU/heap/temp from
+`/api/status/tasks`) · **All Settings** (every component).
 
 ## Preview in a browser (no device needed)
 
 ```powershell
 cd components\web_ui\web
 python -m http.server 8000
-# then open:
-#   http://localhost:8000/?mock=1              — canned data (js/mock.js)
-#   http://localhost:8000/?api=http://<dut-ip> — against a real device
+# http://localhost:8000/?api=http://<dut-ip>   (device must allow the origin)
 ```
 
-`js/mock.js` is DEV-ONLY — never list it in EMBED_FILES.
+## Embedding
 
-## The rules that keep this maintainable
-
-The legacy UI died of a 5,584-line `main.js`. Hard rules here:
-
-1. **One file per page** (`js/pages/<tab>.js`), exporting
-   `render(viewEl) -> cleanupFn`. Pages are lazy-loaded by the router.
-2. **Core stays small** (`js/app.js` ≈ 7 KB): API wrapper, connection
-   watchdog, hash router, `h()` DOM builder, toasts. Page logic never
-   goes in core; styles never go in pages (everything in `app.css`,
-   mobile-first).
-3. **Schema-driven wherever the firmware offers it.** The Settings page
-   renders every component's form from `GET /api/settings/<name>/schema`;
-   the Automation editor builds its dropdowns from
-   `/api/events/sources|actions|values`. New firmware features appear in
-   the UI without UI changes — forms are data, not code.
-4. **Size budget: ≤ 100 KB raw / ≤ 30 KB gzipped total.** Currently
-   ~69 KB raw / ~18.5 KB gzipped. No frameworks, no icon fonts
-   (`js/icons.js` = ~15 hand-picked inline SVGs).
-
-## App-like behavior (the #1 legacy complaint)
-
-`js/app.js` owns a **connection watchdog** (3 s `/api/status` poll):
-
-- online / offline states drive the topbar pill + a banner — the user
-  always sees whether the device is reachable;
-- `expectReboot(reason)` switches to an *expected*-outage banner
-  ("Applying settings — waiting for the device…") used by settings
-  apply, OTA, restore, factory reset — and when the device answers
-  again the current page re-renders itself. **Nobody ever refreshes
-  the page manually.**
-
-## Tabs (matched to the v6 firmware)
-
-| Tab | Backed by |
-|---|---|
-| Status | `/api/status`, `/api/battery` (poll) |
-| Settings | `/api/settings` + per-component values/schema, `submit`, per-component reset |
-| AutoPID | `/api/autopid` (live), `/config` (editor, applies live), `/std_scan[/result]`, `/test` |
-| Automation | `/api/events/*` discovery + log, `event_manager` settings |
-| Terminal | `/ws/cli` |
-| System | `/api/ota/upload`, `/api/settings/backup` (down/up), `factory_reset`, `/api/restart`, `/api/logs` |
-
-Mobile: the sidebar collapses to a drawer under 860 px; tables become
-stacked cards under 640 px (`.rtable` — no separate mobile code paths,
-this was the legacy CAN-monitor pain).
-
-## Embedding (when we wire the firmware)
-
-`web_ui.c` registers one `http_asset_t` table with
-http_server_manager (embedded blobs via `EMBED_FILES`, served by the
-catch-all; API routes always win). Pre-gzip at build time and set
-`content_encoding = "gzip"` — the manager already supports it. Files to
-embed: `index.html`, `app.css`, `js/app.js`, `js/icons.js`,
-`js/pages/*.js` (NOT `js/mock.js`).
+`gen_assets.py` gzips everything under `web/` into C arrays + one
+`http_asset_t` table (`web_ui_assets`); `index.html` is additionally
+mapped to `/`. `web_ui.c` registers the table between
+http_server_manager init and start; API routes always win because the
+catch-all is installed last. The CMake codegen block is guarded with
+`if(NOT CMAKE_SCRIPT_MODE_FILE)` — IDF expands component CMakeLists in
+script mode first, where `add_custom_command` is unavailable.

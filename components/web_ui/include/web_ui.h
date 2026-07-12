@@ -1,8 +1,7 @@
 /**
  * @file web_ui.h
- * @brief v6 (legacy) built-in web UI — registers its embedded ES-module
- *        assets with http_server_manager. No-op unless CONFIG_WICAN_WEBUI_V6
- *        is selected, so main can always call it.
+ * @brief The built-in web UI (WiCAN Pro v2 design, single-page app) —
+ *        registers its embedded gzipped assets with http_server_manager.
  */
 #pragma once
 
@@ -12,8 +11,8 @@
 extern "C" {
 #endif
 
-/** Register the v6 asset table (call between http_server_manager_init and
- *  _start). Returns ESP_OK and does nothing if v6 isn't the selected UI. */
+/** Register the UI asset table (call between http_server_manager_init and
+ *  _start). API/WS routes always win — the catch-all is installed last. */
 esp_err_t web_ui_register(void);
 
 #ifdef __cplusplus

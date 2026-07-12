@@ -1,7 +1,7 @@
-# web_ui — the ESPNetLink settings/status UI (WiCAN v6 layout + branding).
-# Its ES-module assets are gzipped into C byte arrays by gen_assets.py at
-# build time (codegen, not EMBED_FILES, so the many files get correct MIME
-# + gzip cleanly).
+# web_ui — the ESPNetLink web app (WiCAN Pro v2 design: one self-contained
+# single-page index.html). Assets in web/ are gzipped into C byte arrays by
+# gen_assets.py at build time (codegen, not EMBED_FILES, so files get
+# correct MIME + gzip with no per-file boilerplate).
 #
 # The codegen block is guarded: IDF expands component CMakeLists in SCRIPT
 # mode first (requirements pass), where add_custom_command is not

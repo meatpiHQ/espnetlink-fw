@@ -20,6 +20,10 @@
    - 2.6 [AGNSS](#26-agnss)
    - 2.7 [Power / Sleep](#27-power--sleep)
 
+> **Developers:** building from source, the dev-loop flash paths (CDC
+> OTA / HTTP OTA / UART recovery), monitoring, and on-target tests are
+> documented in [BUILDING.md](BUILDING.md).
+
 ---
 
 ## 1. Flashing the Firmware
