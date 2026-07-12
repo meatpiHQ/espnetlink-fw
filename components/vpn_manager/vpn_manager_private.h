@@ -60,6 +60,19 @@ bool      vpn_ts_connected(void);
 bool      vpn_ts_failed(void);
 void      vpn_ts_status(char *ip, size_t ip_len, int *peers);
 
+/* Per-peer snapshot for /api/vpn + the `vpn` CLI ("peer online +
+ * direct-vs-relay"). Returns the number of entries written (0 when the
+ * tunnel is down or type != tailscale). */
+typedef struct
+{
+    char hostname[64];
+    char ip[16];
+    bool online;
+    bool direct_path; /* true = direct UDP path, false = DERP relay */
+} vpn_ts_peer_t;
+
+int vpn_ts_get_peers(vpn_ts_peer_t *out, int max);
+
 /* ---- settings (vpn_manager_settings.c) ------------------------------------ */
 
 /** Register the "vpn_manager" descriptor with settings_manager. */

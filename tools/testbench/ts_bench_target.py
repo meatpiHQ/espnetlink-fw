@@ -225,6 +225,12 @@ def main():
                     time.sleep(2)
             check("DUT sees the peer", v2.get("ts_peers", 0) >= 1,
                   f"ts_peers={v2.get('ts_peers')}")
+            # peer detail surface: hostname/ip/online/path per peer
+            pl = v2.get("peers", [])
+            check("peer detail exposed (pi-bench online)",
+                  any(p.get("hostname", "").startswith("pi-bench") and
+                      p.get("online") for p in pl),
+                  json.dumps(pl))
     finally:
         teardown(ts_dir)
 

@@ -6,6 +6,7 @@
 #include "cmdline_manager.h"
 
 #include "vpn_manager.h"
+#include "vpn_manager_private.h"
 
 static const char *state_str(vpn_state_t st)
 {
@@ -35,6 +36,17 @@ static int cmd_vpn(int argc, char **argv)
     {
         cmdline_printf("  tailnet ip %s, %d peer(s)\n", st.ts_ip,
                        st.ts_peers);
+
+        static vpn_ts_peer_t peers[16]; /* console task only */
+        int n = vpn_ts_get_peers(peers, 16);
+
+        for (int i = 0; i < n; i++)
+        {
+            cmdline_printf("  peer %-16s %-15s %s %s\n",
+                           peers[i].hostname, peers[i].ip,
+                           peers[i].online ? "online " : "offline",
+                           peers[i].direct_path ? "direct" : "relay");
+        }
     }
 
     cmdline_printf("  connects %lu, failures %lu, uptime %lu s\n",

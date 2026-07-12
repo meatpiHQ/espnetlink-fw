@@ -10,9 +10,11 @@
 #include "esp_http_server.h"
 #include "esp_log.h"
 
+#include "cJSON.h"
 #include "http_server_manager.h"
 
 #include "vpn_manager.h"
+#include "vpn_manager_private.h"
 
 static const char *TAG = "vpn_manager";
 
@@ -27,23 +29,70 @@ static const char *state_str(vpn_state_t st)
     }
 }
 
+#define VPN_HTTP_MAX_PEERS 16 /* microlink's default peer-table size */
+
 static esp_err_t vpn_get_handler(httpd_req_t *req)
 {
     vpn_manager_status_t st;
-    char body[288];
 
     (void)vpn_manager_status(&st);
-    snprintf(body, sizeof(body),
-             "{\"state\":\"%s\",\"type\":\"%s\",\"endpoint\":\"%s\","
-             "\"ts_ip\":\"%s\",\"ts_peers\":%d,\"connects\":%lu,"
-             "\"failures\":%lu,\"uptime_s\":%lu}",
-             state_str(st.state),
-             st.tailscale ? "tailscale" : "wireguard", st.endpoint,
-             st.ts_ip, st.ts_peers,
-             (unsigned long)st.connects, (unsigned long)st.failures,
-             (unsigned long)st.uptime_s);
+
+    cJSON *obj = cJSON_CreateObject();
+
+    if (obj == NULL)
+    {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "oom");
+        return ESP_FAIL;
+    }
+
+    cJSON_AddStringToObject(obj, "state", state_str(st.state));
+    cJSON_AddStringToObject(obj, "type",
+                            st.tailscale ? "tailscale" : "wireguard");
+    cJSON_AddStringToObject(obj, "endpoint", st.endpoint);
+    cJSON_AddStringToObject(obj, "ts_ip", st.ts_ip);
+    cJSON_AddNumberToObject(obj, "ts_peers", st.ts_peers);
+    cJSON_AddNumberToObject(obj, "connects", st.connects);
+    cJSON_AddNumberToObject(obj, "failures", st.failures);
+    cJSON_AddNumberToObject(obj, "uptime_s", st.uptime_s);
+
+    if (st.tailscale)
+    {
+        static vpn_ts_peer_t peers[VPN_HTTP_MAX_PEERS]; /* httpd task only */
+        int n = vpn_ts_get_peers(peers, VPN_HTTP_MAX_PEERS);
+        cJSON *arr = cJSON_AddArrayToObject(obj, "peers");
+
+        for (int i = 0; arr != NULL && i < n; i++)
+        {
+            cJSON *p = cJSON_CreateObject();
+
+            if (p == NULL)
+            {
+                break;
+            }
+            cJSON_AddStringToObject(p, "hostname", peers[i].hostname);
+            cJSON_AddStringToObject(p, "ip", peers[i].ip);
+            cJSON_AddBoolToObject(p, "online", peers[i].online);
+            cJSON_AddStringToObject(p, "path",
+                                    peers[i].direct_path ? "direct"
+                                                         : "relay");
+            cJSON_AddItemToArray(arr, p);
+        }
+    }
+
+    char *body = cJSON_PrintUnformatted(obj);
+
+    cJSON_Delete(obj);
+    if (body == NULL)
+    {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "oom");
+        return ESP_FAIL;
+    }
+
     httpd_resp_set_type(req, "application/json");
-    return httpd_resp_send(req, body, HTTPD_RESP_USE_STRLEN);
+    esp_err_t err = httpd_resp_send(req, body, HTTPD_RESP_USE_STRLEN);
+
+    cJSON_free(body);
+    return err;
 }
 
 static esp_err_t vpn_keygen_handler(httpd_req_t *req)

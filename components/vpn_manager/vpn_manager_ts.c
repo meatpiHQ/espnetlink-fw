@@ -111,3 +111,43 @@ void vpn_ts_status(char *ip, size_t ip_len, int *peers)
 
     *peers = microlink_get_peer_count(s_ml);
 }
+
+int vpn_ts_get_peers(vpn_ts_peer_t *out, int max)
+{
+    if (s_ml == NULL || out == NULL || max <= 0)
+    {
+        return 0;
+    }
+
+    int count = microlink_get_peer_count(s_ml);
+
+    if (count > max)
+    {
+        count = max;
+    }
+
+    int written = 0;
+
+    for (int i = 0; i < count; i++)
+    {
+        microlink_peer_info_t info;
+
+        if (microlink_get_peer_info(s_ml, i, &info) != ESP_OK)
+        {
+            continue;
+        }
+
+        vpn_ts_peer_t *p = &out[written++];
+
+        strlcpy(p->hostname, info.hostname, sizeof(p->hostname));
+        p->ip[0] = '\0';
+        if (info.vpn_ip != 0)
+        {
+            microlink_ip_to_str(info.vpn_ip, p->ip);
+        }
+        p->online      = info.online;
+        p->direct_path = info.direct_path;
+    }
+
+    return written;
+}
