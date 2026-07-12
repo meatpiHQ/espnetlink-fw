@@ -645,7 +645,12 @@ esp_err_t agnss_try_inject_now(bool *time_injected, bool *position_injected)
  * ----------------------------------------------------------------------- */
 
 #define CACHE_INTERVAL_DEFAULT_S  120            /* 2 minutes */
-#define CACHE_DISTANCE_M         500.0          /* minimum movement in metres */
+#define CACHE_DISTANCE_M         500.0          /* immediate-save jump, metres */
+#define CACHE_MIN_DELTA_M         50.0          /* flash-wear guard: below this
+                                                   the position counts as
+                                                   unchanged (GPS jitter) and is
+                                                   NEVER rewritten — aiding only
+                                                   needs km-level accuracy */
 
 static volatile bool s_cache_task_running = false;
 
@@ -691,14 +696,22 @@ static void cache_position_task(void *arg)
 
         int64_t now = esp_timer_get_time() / 1000;
         bool time_ok = (now - last_save_ms) >= cache_interval_ms;
-        bool dist_ok = false;
+        double d = 0.0;
         if (have_prev)
         {
-            double d = haversine_m(prev_lat, prev_lon, snap.lat, snap.lon);
-            dist_ok = d >= CACHE_DISTANCE_M;
+            d = haversine_m(prev_lat, prev_lon, snap.lat, snap.lon);
         }
 
-        if (!have_prev || time_ok || dist_ok)
+        bool moved   = have_prev && d >= CACHE_MIN_DELTA_M;
+        bool dist_ok = have_prev && d >= CACHE_DISTANCE_M;
+
+        /* NVS-wear guard: a stationary device must not burn a flash write
+         * every interval on coordinate jitter (COORD_SCALE stores ~1 cm
+         * resolution, so jittered values are never byte-identical and NVS
+         * can't dedup them). Write on the first fix, immediately on big
+         * jumps, and at most once per interval while slowly drifting —
+         * never while parked. */
+        if (!have_prev || dist_ok || (time_ok && moved))
         {
             esp_err_t err = agnss_nvs_write_position(snap.lat, snap.lon,
                                                      snap.altitude_m);
