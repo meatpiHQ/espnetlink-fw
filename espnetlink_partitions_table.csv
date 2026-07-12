@@ -9,3 +9,7 @@ ota_0,    app,  ota_0,    0x30000, 5M,
 ota_1,    app,  ota_1,    ,        5M,
 settings, data, littlefs, ,        256K,
 storage,  data, littlefs, ,        4M,
+# Panic post-mortems (ESP_COREDUMP_ENABLE_TO_FLASH): read with
+# `python -m esp_coredump info_corefile`. 256K: an ELF dump carries every
+# task's stack and 64K overflows once the USB/VPN task set is up.
+coredump, data, coredump, ,        256K,

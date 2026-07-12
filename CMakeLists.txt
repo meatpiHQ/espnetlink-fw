@@ -27,7 +27,9 @@ set(CONFIG_CHERRYUSB_DEVICE_CDC_RNDIS 1)
 # Enable CherryUSB's optional lwIP helpers: `usbd_rndis_eth_rx/tx()`.
 add_compile_definitions(CONFIG_USBDEV_RNDIS_USING_LWIP)
 
-# "Trim" the build. Include the minimal set of components, main, and anything it depends on.
-set(COMPONENTS main)
+# "Trim" the build. Include the minimal set of components, main, and anything
+# it depends on. espcoredump is listed explicitly: nothing depends on it, but
+# it hooks the panic handler to write post-mortems to the `coredump` partition.
+set(COMPONENTS main espcoredump)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project("${PRJ_BIN}")

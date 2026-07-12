@@ -1109,33 +1109,81 @@ static int do_register(microlink_t *ml, ml_noise_state_t *noise) {
  * State: FETCH_PEERS - Send MapRequest, parse MapResponse
  * ========================================================================== */
 
+/* Queue a body-less sync action to wg_mgr (ML_PEER_SYNC_*). */
+static bool queue_peer_action(microlink_t *ml, int action) {
+    ml_peer_update_t *update = ml_psram_calloc(1, sizeof(ml_peer_update_t));
+    if (!update) return false;
+
+    update->action = action;
+    if (xQueueSend(ml->peer_update_queue, &update, pdMS_TO_TICKS(100)) != pdTRUE) {
+        free(update);
+        return false;
+    }
+    return true;
+}
+
 static void parse_peers_from_map_response(microlink_t *ml, cJSON *root) {
     /* Try all field names used by Tailscale (copied from v1 lines 3176-3184):
      *   "Peers"        - Full peer list (initial Stream=false response)
      *   "PeersChanged" - Incremental updates (Stream=true long-poll)
      *   "peers"        - Lowercase fallback */
+    bool full_map = true; /* "Peers" is the AUTHORITATIVE complete list */
     cJSON *peers = cJSON_GetObjectItem(root, "Peers");
     if (!peers) {
         peers = cJSON_GetObjectItem(root, "PeersChanged");
-        if (peers) ESP_LOGI(TAG, "Using 'PeersChanged' field for peer list");
+        if (peers) {
+            full_map = false; /* incremental: absent peers still exist */
+            ESP_LOGI(TAG, "Using 'PeersChanged' field for peer list");
+        }
     }
     if (!peers) {
         peers = cJSON_GetObjectItem(root, "peers");
         if (peers) ESP_LOGI(TAG, "Using 'peers' (lowercase) field for peer list");
     }
+
+    /* Deferred-map stream (Headscale): the first content-bearing message
+     * is the complete netmap no matter how it spells the peer set — it
+     * may use "PeersChanged", or omit the field entirely when the
+     * tailnet has no other nodes. Either way it is authoritative. */
+    if (ml->first_map_pending &&
+        (peers != NULL || cJSON_GetObjectItem(root, "Node") != NULL)) {
+        ml->first_map_pending = false;
+        full_map = true;
+        if (!peers || !cJSON_IsArray(peers)) {
+            /* Complete map with no peers: prune everything we carry
+             * (NVS-cached peers from a previous life). */
+            ESP_LOGI(TAG, "First map of stream carries no peers — sweeping");
+            if (queue_peer_action(ml, ML_PEER_SYNC_BEGIN)) {
+                (void)queue_peer_action(ml, ML_PEER_SYNC_END);
+            }
+        }
+    }
+
     if (!peers || !cJSON_IsArray(peers)) {
         /* Normal for delta updates (PeersRemoved, PeersChangedPatch only) */
         goto check_removed;
     }
 
     int count = cJSON_GetArraySize(peers);
-    ESP_LOGI(TAG, "MapResponse: %d peers", count);
+    ESP_LOGI(TAG, "MapResponse: %d peers%s", count,
+             full_map ? " (full map — mark-and-sweep)" : "");
+
+    /* Full map: bracket the adds so wg_mgr can prune peers the control
+     * server no longer lists (removed while we were offline, NVS-cached
+     * phantoms after a control-server rebuild — BUG_TS_PHANTOM_PEERS.md).
+     * If any add fails to queue the sweep is aborted: pruning against a
+     * partial add-set would remove live peers. */
+    bool sweep = full_map && queue_peer_action(ml, ML_PEER_SYNC_BEGIN);
+    bool add_dropped = false;
 
     cJSON *peer;
     cJSON_ArrayForEach(peer, peers) {
         /* Allocate peer update (freed by wg_mgr after processing) */
         ml_peer_update_t *update = ml_psram_calloc(1, sizeof(ml_peer_update_t));
-        if (!update) continue;
+        if (!update) {
+            add_dropped = true;
+            continue;
+        }
 
         update->action = ML_PEER_ADD;
 
@@ -1225,7 +1273,16 @@ static void parse_peers_from_map_response(microlink_t *ml, cJSON *root) {
         if (xQueueSend(ml->peer_update_queue, &update, pdMS_TO_TICKS(100)) != pdTRUE) {
             ESP_LOGW(TAG, "Peer update queue full, dropping %s", update->hostname);
             free(update);
+            add_dropped = true;
         }
+    }
+
+    if (sweep) {
+        (void)queue_peer_action(ml, add_dropped ? ML_PEER_SYNC_ABORT
+                                                : ML_PEER_SYNC_END);
+        /* If even this send fails the sweep simply never fires: without
+         * SYNC_END wg_mgr prunes nothing, and the next full map restarts
+         * the cycle with a fresh SYNC_BEGIN. */
     }
 
 check_removed:
@@ -2022,6 +2079,15 @@ static int do_start_long_poll(microlink_t *ml, ml_noise_state_t *noise) {
     free(h2_buf);
 
     ESP_LOGI(TAG, "Streaming MapRequest sent on stream 5");
+
+    /* Deferred-netmap path (Headscale): the stream's first content
+     * message IS the full map — but it may omit "Peers" entirely (empty
+     * tailnet) or ship the set as "PeersChanged". Arm the authoritative
+     * first-map sweep so NVS-cached peers the server no longer knows
+     * get pruned (BUG_TS_PHANTOM_PEERS.md). */
+    if (ml->map_deferred_to_stream) {
+        ml->first_map_pending = true;
+    }
     return 0;
 }
 

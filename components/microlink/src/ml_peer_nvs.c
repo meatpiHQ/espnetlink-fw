@@ -110,10 +110,7 @@ void ml_peer_nvs_deinit(void) {
 esp_err_t ml_peer_nvs_save(const ml_peer_t *peer) {
     if (!s_initialized || !peer || !s_table) return ESP_ERR_INVALID_STATE;
 
-    /* Advance LRU clock */
-    s_table->lru_clock++;
-
-    /* Build entry */
+    /* Build entry (LRU counter assigned after the change check) */
     peer_nvs_entry_t entry;
     memset(&entry, 0, sizeof(entry));
 
@@ -121,7 +118,6 @@ esp_err_t ml_peer_nvs_save(const ml_peer_t *peer) {
     memcpy(entry.public_key, peer->public_key, 32);
     memcpy(entry.disco_key, peer->disco_key, 32);
     entry.derp_region = peer->derp_region;
-    entry.lru_counter = s_table->lru_clock;
 
     /* Store up to 2 endpoints */
     int stored = 0;
@@ -146,6 +142,25 @@ esp_err_t ml_peer_nvs_save(const ml_peer_t *peer) {
             break;
         }
     }
+
+    /* NVS wear guard: every full netmap (one per reconnect) re-adds every
+     * peer, and the LRU stamp makes the blob differ each time — so an
+     * unconditional flush burns a flash write per peer per reconnect for
+     * peers that haven't changed at all. If the entry is identical apart
+     * from recency, bump the LRU in RAM only; it is persisted piggybacked
+     * on the next REAL change and only orders cache eviction. */
+    if (slot >= 0) {
+        peer_nvs_entry_t cur = s_table->entries[slot];
+        cur.lru_counter = 0;
+        if (memcmp(&cur, &entry, sizeof(entry)) == 0) {
+            s_table->lru_clock++;
+            s_table->entries[slot].lru_counter = s_table->lru_clock;
+            return ESP_OK;
+        }
+    }
+
+    s_table->lru_clock++;
+    entry.lru_counter = s_table->lru_clock;
 
     if (slot >= 0) {
         /* Update existing entry */
@@ -220,6 +235,31 @@ int ml_peer_nvs_load_all(ml_peer_t *peers, int max_peers) {
 
     ESP_LOGI(TAG, "Loaded %d cached peers from NVS", loaded);
     return loaded;
+}
+
+esp_err_t ml_peer_nvs_remove(const uint8_t public_key[32]) {
+    if (!s_initialized || !public_key || !s_table) return ESP_ERR_INVALID_STATE;
+
+    for (int i = 0; i < s_table->count; i++) {
+        if (memcmp(s_table->entries[i].public_key, public_key, 32) != 0) {
+            continue;
+        }
+
+        ESP_LOGI(TAG, "Removing cached peer %s (slot=%d/%d)",
+                 s_table->entries[i].hostname_short, i, s_table->count);
+
+        /* Compact: move the last entry into the freed slot */
+        s_table->count--;
+        if (i != s_table->count) {
+            s_table->entries[i] = s_table->entries[s_table->count];
+        }
+        memset(&s_table->entries[s_table->count], 0,
+               sizeof(peer_nvs_entry_t));
+
+        return flush_table();
+    }
+
+    return ESP_ERR_NOT_FOUND;
 }
 
 esp_err_t ml_peer_nvs_clear(void) {

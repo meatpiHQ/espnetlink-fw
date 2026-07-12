@@ -587,15 +587,16 @@ static int add_peer(microlink_t *ml, const ml_peer_update_t *update) {
     return idx;
 }
 
-static void remove_peer(microlink_t *ml, const ml_peer_update_t *update) {
-    int idx = find_peer_by_key(ml, update->public_key);
-    if (idx < 0) return;
-
+static void remove_peer_at(microlink_t *ml, int idx) {
     /* Remove from wireguard-lwip */
     if (ml->wg_netif && ml->peers[idx].wg_peer_index >= 0) {
         struct netif *netif = (struct netif *)ml->wg_netif;
         wireguardif_remove_peer(netif, (u8_t)ml->peers[idx].wg_peer_index);
     }
+
+    /* Drop the NVS cache entry too — otherwise the boot-time preload
+     * resurrects the peer forever (BUG_TS_PHANTOM_PEERS.md) */
+    ml_peer_nvs_remove(ml->peers[idx].public_key);
 
     char ip_str[16];
     microlink_ip_to_str(ml->peers[idx].vpn_ip, ip_str);
@@ -609,16 +610,54 @@ static void remove_peer(microlink_t *ml, const ml_peer_update_t *update) {
     }
 }
 
+static void remove_peer(microlink_t *ml, const ml_peer_update_t *update) {
+    int idx = find_peer_by_key(ml, update->public_key);
+    if (idx < 0) return;
+
+    remove_peer_at(ml, idx);
+}
+
+/* Full-netmap mark-and-sweep state (wg_mgr task only). Peers re-added
+ * between SYNC_BEGIN and SYNC_END are "seen"; the rest no longer exist
+ * in the tailnet (removed while we were offline, or a rebuilt control
+ * server) and are pruned at SYNC_END. */
+static bool s_sync_active;
+static bool s_sync_seen[ML_MAX_PEERS];
+
 static void process_peer_updates(microlink_t *ml) {
     ml_peer_update_t *update;
     while (xQueueReceive(ml->peer_update_queue, &update, 0) == pdTRUE) {
         if (!update) continue;
         switch (update->action) {
         case ML_PEER_ADD:
-            add_peer(ml, update);
+            {
+                int idx = add_peer(ml, update);
+                if (s_sync_active && idx >= 0 && idx < ML_MAX_PEERS) {
+                    s_sync_seen[idx] = true;
+                }
+            }
             break;
         case ML_PEER_REMOVE:
             remove_peer(ml, update);
+            break;
+        case ML_PEER_SYNC_BEGIN:
+            s_sync_active = true;
+            memset(s_sync_seen, 0, sizeof(s_sync_seen));
+            break;
+        case ML_PEER_SYNC_ABORT:
+            s_sync_active = false;
+            break;
+        case ML_PEER_SYNC_END:
+            if (s_sync_active) {
+                s_sync_active = false;
+                for (int i = ml->peer_count - 1; i >= 0; i--) {
+                    if (ml->peers[i].active && !s_sync_seen[i]) {
+                        ESP_LOGI(TAG, "Full-netmap prune: %s",
+                                 ml->peers[i].hostname);
+                        remove_peer_at(ml, i);
+                    }
+                }
+            }
             break;
         case ML_PEER_UPDATE_ENDPOINT:
             /* Update endpoint/DERP for existing peer (delta patch) */

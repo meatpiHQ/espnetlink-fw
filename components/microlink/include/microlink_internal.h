@@ -217,6 +217,15 @@ typedef struct {
         ML_PEER_ADD,
         ML_PEER_REMOVE,
         ML_PEER_UPDATE_ENDPOINT,
+        /* Full-netmap mark-and-sweep (BUG_TS_PHANTOM_PEERS.md): a
+         * MapResponse "Peers" array is the AUTHORITATIVE list, so coord
+         * brackets its adds with BEGIN/END and wg_mgr prunes any active
+         * peer not re-added in between. ABORT cancels the sweep when an
+         * add was dropped (queue full) — pruning on partial data would
+         * remove live peers. */
+        ML_PEER_SYNC_BEGIN,
+        ML_PEER_SYNC_END,
+        ML_PEER_SYNC_ABORT,
     } action;
     uint32_t vpn_ip;
     uint8_t public_key[32];
@@ -420,6 +429,13 @@ struct microlink_s {
      * served as the first message of the Stream=true long-poll. */
     bool map_deferred_to_stream;
 
+    /* The next map message that carries node/peer content is the FIRST
+     * of a new map session and therefore the AUTHORITATIVE peer set —
+     * even when Headscale ships it without a "Peers" field (empty
+     * tailnet) or as "PeersChanged". Drives the full-netmap
+     * mark-and-sweep (BUG_TS_PHANTOM_PEERS.md). Coord task only. */
+    bool first_map_pending;
+
     /* WiCAN: long-poll map stream reassembly (PSRAM, lazy alloc; owned
      * by the coord task). ts2021 stream framing is [4B LE length][JSON]
      * and one message may span multiple Noise/H2 frames. */
@@ -555,6 +571,7 @@ esp_err_t ml_peer_nvs_init(void);
 void ml_peer_nvs_deinit(void);
 esp_err_t ml_peer_nvs_save(const ml_peer_t *peer);
 int ml_peer_nvs_load_all(ml_peer_t *peers, int max_peers);
+esp_err_t ml_peer_nvs_remove(const uint8_t public_key[32]);
 esp_err_t ml_peer_nvs_clear(void);
 
 #ifdef CONFIG_ML_ZERO_COPY_WG
