@@ -562,6 +562,11 @@ esp_err_t api_http_init(void)
 
     if (err == ESP_OK)
     {
+        err = api_http_register_fs();
+    }
+
+    if (err == ESP_OK)
+    {
         err = api_http_register_ota();
     }
 

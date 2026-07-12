@@ -68,6 +68,7 @@ void api_schedule_reboot(restart_tracker_planned_reason_t reason,
 esp_err_t api_http_register_settings(void);
 esp_err_t api_http_register_system(void);
 esp_err_t api_http_register_diag(void);
+esp_err_t api_http_register_fs(void);
 esp_err_t api_http_register_ota(void);
 
 /** Batch-changed flag shared between the settings PUT and submit handlers. */

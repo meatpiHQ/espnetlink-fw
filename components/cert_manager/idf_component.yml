@@ -1,0 +1,3 @@
+## cert_manager has no managed dependencies (filesystem, http_server_manager,
+## multipart_upload and log_manager are repo components, declared in CMakeLists).
+dependencies: {}

@@ -2098,6 +2098,12 @@ CONFIG_WIREGUARD_x25519_IMPLEMENTATION_DEFAULT=y
 # end of WireGuard
 
 #
+# ESPNetLink filesystem
+#
+CONFIG_FILESYSTEM_PARTITION_LABEL="storage"
+# end of ESPNetLink filesystem
+
+#
 # ESPNetLink i2c_bus
 #
 CONFIG_WICAN_I2C_SDA_GPIO=48

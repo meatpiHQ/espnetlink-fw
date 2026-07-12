@@ -6,9 +6,10 @@ idf_component_register(
     PRIV_INCLUDE_DIRS "."
     # Service: the one way components do HTTP-client work. Per-request
     # client instances on the caller's task (thread-safe by isolation) +
-    # a concurrency limiter. ESPNetLink port: event_manager glue is a
-    # no-op stub; cert_manager sets are unsupported (bundle-only TLS);
-    # download-to-file answers ESP_ERR_NOT_SUPPORTED (no filesystem
-    # write-stream API on this product).
-    PRIV_REQUIRES esp_http_client mbedtls log_manager
+    # a concurrency limiter; TLS via cert_manager sets. ESPNetLink port:
+    # event_manager glue is a no-op stub (no event_manager on this
+    # product); cert_set TLS + the atomic download-to-file path are live
+    # again since the cert_manager + full filesystem ports (2026-07-12).
+    PRIV_REQUIRES esp_http_client mbedtls cert_manager filesystem
+                  log_manager
 )

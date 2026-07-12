@@ -33,6 +33,8 @@ jobs:
           - components/http_client_manager/host_test
           - components/imu_manager/host_test
           - components/vpn_manager/host_test
+          - components/filesystem/host_test
+          - components/cert_manager/host_test
     steps:
       - uses: actions/checkout@v4
       - name: Build and run ${{ matrix.suite }}

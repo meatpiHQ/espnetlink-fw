@@ -21,6 +21,7 @@
 
 #include "hw_config.h"
 #include "driver/gpio.h"
+#include "dev_status_manager.h"
 #include "usb_dev_ethernet.h"
 #include "esp_timer.h"
 #include "cJSON.h"
@@ -167,6 +168,15 @@ static void on_ip_event(void *arg, esp_event_base_t event_base, int32_t event_id
             xEventGroupClearBits(s_evt, BIT_DISCONNECTED);
             xEventGroupSetBits(s_evt, BIT_CONNECTED);
         }
+
+        /* ESPNetLink: publish the WAN uplink into dev_status. The
+         * eth_connected bit's WiCAN semantic is "the uplink this dongle
+         * provides" (their usb_host side sets it for THIS device's
+         * RNDIS) — on the dongle itself, LTE PPP is that same uplink.
+         * Consumers gating on DEV_STATUS_NETWORK_CONNECTED_MASK
+         * (vpn_manager, ha_webhooks, /api/status network_connected)
+         * work unmodified. */
+        dev_status_manager_set(DEV_STATUS_BIT_ETH_CONNECTED);
     }
     else if (event_id == IP_EVENT_PPP_LOST_IP)
     {
@@ -180,6 +190,8 @@ static void on_ip_event(void *arg, esp_event_base_t event_base, int32_t event_id
             xEventGroupClearBits(s_evt, BIT_CONNECTED);
             xEventGroupSetBits(s_evt, BIT_DISCONNECTED);
         }
+
+        dev_status_manager_clear(DEV_STATUS_BIT_ETH_CONNECTED);
     }
 }
 

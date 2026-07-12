@@ -10,6 +10,7 @@ idf_component_register(
     REQUIRES esp_netif esp_event freertos modem_manager esp_modem usb_dev_ethernet console
              espressif__usb_host_cdc_acm json settings_manager cmdline_manager
     PRIV_REQUIRES driver hw_config usb http_server_manager esp_http_server
+                  dev_status_manager
 )
 
 # C++17 required by lte_upstream_pppos_usb.cpp (and by esp_modem headers)

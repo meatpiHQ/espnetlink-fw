@@ -49,20 +49,25 @@ exist as far as the product is concerned.
 | `/api/ota/status` | GET | api_http |
 | `/upload/ota.bin` | POST | api_http — legacy HA-integration OTA alias |
 | `/api/webhook` | GET, POST, DELETE | ha_webhooks (ha_webhooks/HTTP_API.md) — HA registration + telemetry poster config |
+| `/api/fs/list`, `/api/fs/info` | GET | api_http (filesystem/HTTP_API.md) — file manager, /data namespace |
+| `/api/fs/download` | GET | api_http — streamed, Content-Disposition |
+| `/api/fs/upload`, `/api/fs/mkdir` | POST | api_http — streamed multipart/raw, atomic |
+| `/api/fs/file` | DELETE | api_http |
+| `/api/certs` | GET, DELETE | cert_manager — TLS cert sets (no read-back of key material) |
+| `/api/certs/upload` | POST | cert_manager — multipart fields or raw PEM `?set=&type=` |
 | `/api/wifi/status` | GET | wifi_manager (wifi_manager/HTTP_API.md) |
 | `/api/wifi/scan` | GET | wifi_manager |
 | `/api/lte` | GET | lte_upstream_pppos — uplink status (web UI status page) |
 | `/api/gps` | GET | gps — fix snapshot (web UI status page) |
-| `/api/vpn`, `/api/vpn/keygen` | GET / POST | vpn_manager (port in progress) |
-| `/api/imu` | GET | imu_manager (port in progress) |
+| `/api/vpn`, `/api/vpn/keygen` | GET / POST | vpn_manager |
+| `/api/imu` | GET | imu_manager |
 | `/` + UI assets | GET | web_ui (gzip asset table) |
 
 Registered settings components (each answers under `/api/settings/<name>`):
 `log_manager`, `dev_status_manager`, `wifi_manager`, `cmdline_manager`,
 `lte_upstream_pppos`, `gps`, `system`, `usb_cli_console`,
-`restart_tracker`, `ha_webhooks`, `mdns_manager` (+ `vpn_manager`,
-`imu_manager` once their ports land; `imu` retires with the imu_manager
-swap).
+`restart_tracker`, `ha_webhooks`, `mdns_manager`, `vpn_manager`,
+`imu_manager`, `filesystem`.
 
 ## Home Assistant device contract (components/device-contract/)
 

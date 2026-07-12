@@ -1,0 +1,10 @@
+menu "ESPNetLink filesystem"
+
+    config FILESYSTEM_PARTITION_LABEL
+        string "Internal data FS partition label"
+        default "storage"
+        help
+            Label of the LittleFS data partition the filesystem component
+            mounts at /data. Must exist in the partition table.
+
+endmenu

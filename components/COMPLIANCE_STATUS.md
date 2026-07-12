@@ -22,6 +22,8 @@ Tracked against `MEATPI_COMPONENT_STANDARD.md` rev 1.0. Updated 2026-07-11
 | web_ui (browser settings/status/system UI at `/`) | ✅ | WiCAN v6 layout, ESPNetLink branding; nav pruned to Status/Settings/System/About; status page reads /api/lte + /api/gps + /api/vpn + /api/imu; gzip asset serving verified |
 | vpn_manager (WireGuard + Tailscale) + vendored esp_wireguard/wireguard_lwip/microlink | ✅ | Ported with 4 documented mbedtls-3.6 fixes in microlink (PROVENANCE.md); /api/vpn + keygen + settings schema live on device; tunnels not yet bench-tested against real endpoints |
 | imu_manager + i2c_bus (replaces the legacy imu component) | ✅ | SMD/WoM detectors, /api/imu (bench: gravity on Z, die temp), motion dev-status bit, `imu` CLI; ESPNetLink extension imu_manager_wom.c keeps `sleep 4` wake-on-motion working |
+| filesystem (FULL WiCAN core, replaces the shim) | ✅ | /data mount on the `storage` littlefs partition (same flash bytes, new VFS prefix), atomic writes, streams/async pipe, path validation, `fs` CLI + {cli} settings, /api/fs file manager. Device-verified: list/info/upload/delete + legacy config.json.imported visible at /data |
+| cert_manager (TLS certificate sets) | ✅ | /data/certs storage (WiCAN-verbatim), /api/certs surface device-verified (upload PEM → list → delete); http_client_manager cert_set TLS path re-enabled (was bundle-only), download() restored |
 | HTTP route docs (components/HTTP_API.md central map) | ✅ | Central map current (settings/system/diag/ota/webhook/wifi/lte/gps/vpn/imu + UI) |
 
 ## §2 Memory
@@ -107,7 +109,8 @@ behavior is bench-verified today; on-target pytest apps are the backlog.
 | vpn_manager | ✅ | WiCAN suite (pure config/state logic). Tunnels not yet exercised against live endpoints |
 | ha_webhooks / multipart_upload / web_ui | — | Transport/UI glue; bench-verified live (fake-HA pushes incl. gzip + diff mode; multipart + raw OTA uploads; UI serving). esp_wireguard/wireguard_lwip/microlink are vendored engines (upstream provenance documented) |
 | usb_cli_console | ✅ | {cli} descriptor gate. Console core/OTA path is USB-bound — exercised on every bench OTA/CLI session |
-| filesystem | ✅* | NEW test_apps smoke (mount + POSIX roundtrip + delete on the real storage partition) — *on-target run pending bench pass |
+| filesystem | ✅ | WiCAN suites: 10 pure path-routing host tests + the full 13-marker on-target test_app (mount/atomic/list/validation/remount) |
+| cert_manager | ✅ | WiCAN suite: 6 pure policy host tests. HTTP surface bench-verified |
 | hw_config | — | Header-only pin map; nothing executable |
 | usb_dev_ethernet | — | NEW test_apps smoke (stack up + 5 s stability); full RNDIS behavior is host-side — bench-verified daily (DHCP lease, NAPT, OTA-over-RNDIS) |
 | usb_cdc_host_manager, usb_dev_bridge | — | Legacy alternate modes (not active in product boot); HIL backlog if revived |

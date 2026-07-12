@@ -1,5 +1,8 @@
 # Standard §7: test apps build against the MAIN firmware's config — the
 # repo-root sdkconfig.defaults is inherited first (see CMakeLists.txt).
+# This overlay holds only the test-app-relative partition path and
+# test-only options; the `storage` littlefs partition this component
+# mounts comes from the main partition table.
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../../../espnetlink_partitions_table.csv"
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y

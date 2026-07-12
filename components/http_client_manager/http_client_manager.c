@@ -9,6 +9,7 @@
 
 #include <string.h>
 
+#include "esp_attr.h" /* ESPNetLink: explicit include for EXT_RAM_BSS_ATTR */
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
@@ -17,6 +18,8 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
+#include "cert_manager.h"
+#include "filesystem.h"
 #include "log_manager.h"
 
 #include "http_client_manager_private.h"
@@ -31,11 +34,17 @@ static StaticSemaphore_t s_limiter_buf; /* internal: FreeRTOS object */
 static http_client_stats_t s_stats;
 static bool s_inited;
 
-/* ESPNetLink port: WiCAN's download-to-file machinery (a PSRAM bounce
- * buffer feeding filesystem's async write pipe) is not carried — this
- * product's filesystem shim has no write-stream API and no consumer
- * needs HTTP downloads. http_client_manager_download() stays in the
- * public API but answers ESP_ERR_NOT_SUPPORTED. */
+/* ---- download machinery -------------------------------------------------------
+ * The CALLER reads the network into one PSRAM buffer and feeds
+ * filesystem's ASYNC PIPE (its internal-stack writer task does the
+ * media writes): receive and write overlap, so the slower of (network,
+ * media) sets the pace instead of their sum. */
+
+#define HC_DL_BUF_SIZE (32 * 1024)
+
+static uint8_t s_dl_buf[HC_DL_BUF_SIZE] EXT_RAM_BSS_ATTR;
+static SemaphoreHandle_t s_dl_mutex;      /* one download at a time     */
+static StaticSemaphore_t s_dl_mutex_buf;  /* internal: FreeRTOS object  */
 
 /* ---- lifecycle -------------------------------------------------------------- */
 
@@ -53,6 +62,7 @@ esp_err_t http_client_manager_init(void)
     s_limiter = xSemaphoreCreateCountingStatic(
         HTTP_CLIENT_MANAGER_MAX_CONCURRENT,
         HTTP_CLIENT_MANAGER_MAX_CONCURRENT, &s_limiter_buf);
+    s_dl_mutex = xSemaphoreCreateMutexStatic(&s_dl_mutex_buf);
     s_inited = true;
     hcm_events_register();
     return ESP_OK;
@@ -87,11 +97,36 @@ static void configure_tls(esp_http_client_config_t *cfg,
 {
     if (req->cert_set != NULL && req->cert_set[0] != '\0')
     {
-        /* ESPNetLink has no cert_manager: named certificate sets are
-         * unsupported on this product — verify against the esp-tls
-         * bundle instead (fail-open to the safer default). */
-        ESP_LOGW(TAG, "cert_set '%s' unsupported on this product; "
-                      "using the certificate bundle", req->cert_set);
+        const char *ca;
+        size_t ca_len;
+
+        if (cert_manager_get(req->cert_set, CERT_MANAGER_CA, &ca,
+                             &ca_len) == ESP_OK)
+        {
+            cfg->cert_pem = ca;
+            cfg->cert_len = ca_len;
+
+            const char *ccert;
+            const char *ckey;
+            size_t ccert_len;
+            size_t ckey_len;
+
+            if (cert_manager_get(req->cert_set, CERT_MANAGER_CLIENT_CERT,
+                                 &ccert, &ccert_len) == ESP_OK &&
+                cert_manager_get(req->cert_set, CERT_MANAGER_CLIENT_KEY,
+                                 &ckey, &ckey_len) == ESP_OK)
+            {
+                cfg->client_cert_pem = ccert;
+                cfg->client_cert_len = ccert_len;
+                cfg->client_key_pem = ckey;
+                cfg->client_key_len = ckey_len;
+            }
+
+            return;
+        }
+
+        ESP_LOGW(TAG, "cert_set '%s' unusable; using the bundle",
+                 req->cert_set);
     }
 
     if (req->ca_pem != NULL)
@@ -347,12 +382,122 @@ esp_err_t http_client_manager_download(const char *url,
                                        void (*progress_cb)(size_t done,
                                                            size_t total))
 {
-    (void)url;
-    (void)save_path;
-    (void)progress_cb;
-    /* ESPNetLink: no download-to-file support (see the note above the
-     * lifecycle section) — no consumer on this product. */
-    return ESP_ERR_NOT_SUPPORTED;
+    if (!hc_url_valid(url) || save_path == NULL || !s_inited)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    xSemaphoreTake(s_dl_mutex, portMAX_DELAY);   /* one download       */
+    xSemaphoreTake(s_limiter, portMAX_DELAY);    /* one request slot   */
+
+    filesystem_wstream_t *ws = NULL;
+    esp_err_t err = filesystem_write_open(save_path, &ws);
+    bool pipe_open = false;
+    esp_http_client_handle_t client = NULL;
+    int status = -1;
+    size_t total_rx = 0;
+
+    if (err == ESP_OK)
+    {
+        err = filesystem_write_async_begin(ws);
+        pipe_open = (err == ESP_OK);
+    }
+
+    if (err == ESP_OK)
+    {
+        esp_http_client_config_t cfg =
+        {
+            .url = url,
+            .timeout_ms = HC_DEFAULT_TIMEOUT_MS,
+            .user_agent = "ESPNetLink/6", /* ESPNetLink port of WiCAN/6 */
+        };
+
+        if (hc_url_is_tls(url))
+        {
+            cfg.crt_bundle_attach = esp_crt_bundle_attach;
+        }
+
+        client = esp_http_client_init(&cfg);
+        err = (client != NULL) ? esp_http_client_open(client, 0)
+                               : ESP_FAIL;
+    }
+
+    int64_t total = -1;
+
+    if (err == ESP_OK && client != NULL)
+    {
+        total = esp_http_client_fetch_headers(client);
+        status = esp_http_client_get_status_code(client);
+        err = (total >= 0 && status >= 200 && status < 300)
+                  ? ESP_OK
+                  : ESP_ERR_INVALID_RESPONSE;
+    }
+
+    while (err == ESP_OK)
+    {
+        /* read into our buffer while filesystem's writer task flushes
+         * the previous chunk — receive and media write overlap */
+        int r = esp_http_client_read(client, (char *)s_dl_buf,
+                                     sizeof(s_dl_buf));
+
+        if (r < 0)
+        {
+            err = ESP_FAIL;
+        }
+        else if (r == 0)
+        {
+            break; /* body complete */
+        }
+        else
+        {
+            err = filesystem_write_async_chunk(ws, s_dl_buf, (size_t)r);
+            total_rx += (size_t)r;
+
+            if (progress_cb != NULL)
+            {
+                progress_cb(total_rx, (total > 0) ? (size_t)total : 0);
+            }
+        }
+    }
+
+    if (client != NULL)
+    {
+        esp_http_client_cleanup(client);
+    }
+
+    if (pipe_open)
+    {
+        esp_err_t end_err = filesystem_write_async_end(ws,
+                                                       err == ESP_OK);
+
+        if (err == ESP_OK)
+        {
+            err = end_err;
+        }
+    }
+    else if (ws != NULL)
+    {
+        filesystem_write_abort(ws);
+    }
+
+    s_stats.bytes_rx += total_rx;
+
+    if (err == ESP_OK)
+    {
+        s_stats.requests++;
+        ESP_LOGI(TAG, "downloaded %s -> %s (%u bytes)", url, save_path,
+                 (unsigned)total_rx);
+    }
+    else
+    {
+        s_stats.failures++;
+        ESP_LOGW(TAG, "download %s failed: %s (status %d)", url,
+                 esp_err_to_name(err), status);
+    }
+
+    xSemaphoreGive(s_limiter);
+    xSemaphoreGive(s_dl_mutex);
+    return err;
 }
 
 void http_client_manager_free(http_client_response_t *resp)

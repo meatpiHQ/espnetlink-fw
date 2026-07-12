@@ -15,6 +15,7 @@
 #include "hw_config.h"
 #include "filesystem.h"
 #include "gps.h"
+#include "cert_manager.h"
 #include "i2c_bus.h"
 #include "imu_manager.h"
 #include "vpn_manager.h"
@@ -414,6 +415,8 @@ void app_main(void)
     init_step("i2c_bus_init", i2c_bus_init);
     init_step("imu_manager_init", imu_manager_init);
     init_step("vpn_manager_init", vpn_manager_init);
+    init_step("filesystem_register_settings", filesystem_register_settings);
+    init_step("cert_manager_init", cert_manager_init);
     /* product components register their settings descriptors (§4.1);
      * their console commands register from the settings boot apply,
      * gated by each component's `cli` setting (§6b) */
@@ -431,6 +434,7 @@ void app_main(void)
     init_step("gps_register_http", gps_register_http);
     init_step("imu_manager_register_http", imu_manager_register_http);
     init_step("vpn_manager_register_http", vpn_manager_register_http);
+    init_step("cert_manager_register_http", cert_manager_register_http);
     /* asset tables are pre-start only (§9.3): register the UI before
      * http_server_manager_start */
     init_step("web_ui_register", web_ui_register);
@@ -550,6 +554,8 @@ void app_main(void)
 
     start_component("restart_tracker", restart_tracker_start);
     start_component("ota_manager", ota_manager_start);
+    start_component("filesystem", filesystem_start);
+    start_component("cert_manager", cert_manager_start);
     start_component("i2c_bus", i2c_bus_start);
     start_component("imu_manager", imu_manager_start);
     start_component("wifi_manager", wifi_manager_start);

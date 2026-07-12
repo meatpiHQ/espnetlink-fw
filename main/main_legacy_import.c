@@ -27,8 +27,11 @@
 
 static const char *TAG = "main";
 
-#define LEGACY_PATH   FS_BASE_PATH "/config.json"
-#define IMPORTED_PATH FS_BASE_PATH "/config.json.imported"
+/* The storage littlefs partition now mounts at /data (full WiCAN
+ * filesystem port, 2026-07-12) — same flash bytes the legacy build wrote
+ * at /storage, new VFS prefix. */
+#define LEGACY_PATH   "/data/config.json"
+#define IMPORTED_PATH "/data/config.json.imported"
 #define LEGACY_MAX    4096
 
 static char *read_legacy_file(void)

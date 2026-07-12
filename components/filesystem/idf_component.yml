@@ -1,3 +1,5 @@
-## filesystem: owns the general /storage LittleFS mount.
+## Managed component dependencies for filesystem.
+## LittleFS backs the internal-flash data FS (/data) this component owns.
+## ESPNetLink: pin proven on IDF 5.5.3 (within WiCAN's ^1.14.0 range).
 dependencies:
   joltwallet/littlefs: "^1.20.4"

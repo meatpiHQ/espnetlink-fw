@@ -173,6 +173,6 @@ direct_dependencies:
 - idf
 - igrr/libnmea
 - joltwallet/littlefs
-manifest_hash: 91fa3a77b56b04b9e031bf429927f0e953ee04f0054f838f1cd2fdbd19df0c50
+manifest_hash: 3662a507126cbdb18914b176594c57b9eae5da651a4b2766b9b57a72461090f2
 target: esp32s3
 version: 2.0.0
