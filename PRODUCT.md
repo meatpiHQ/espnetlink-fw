@@ -19,11 +19,12 @@ hardware/toolchain facts the standard refers to generically.
 
 ## Toolchain (pinned)
 
-- **ESP-IDF v5.5.3** — the exact version the product builds and tests with.
-  (The standard's IDF v6 cJSON note does not apply yet: v5.5 still bundles
-  the `json` component; the ported core components document this in their
-  CMakeLists/idf_component.yml and switch to `espressif/cjson` on the v6
-  migration.)
+- **ESP-IDF v6.0.2** — the exact version the product builds and tests with
+  (migrated from v5.5.3 on 2026-07-12; same version as the WiCAN v6
+  reference). Per the standard's v6 note, cJSON comes from the
+  `espressif/cjson` managed component (v6 dropped the bundled `json`),
+  gpio/uart come from the split `esp_driver_*` components, and crypto is
+  mbedTLS 4 / TF-PSA-Crypto.
 - Canonical minimal config: repo-root `sdkconfig.defaults`
 - Partition table: repo-root `espnetlink_partitions_table.csv`
   (`ota_0`/`ota_1` 5 MB app slots, `settings` 256 KB LittleFS — the Settings

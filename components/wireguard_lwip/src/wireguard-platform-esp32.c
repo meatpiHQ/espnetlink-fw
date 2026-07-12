@@ -8,6 +8,7 @@
 #include "esp_timer.h"
 #include "lwip/sys.h"
 #include <string.h>
+#include <sys/time.h>
 
 /* ============================================================================
  * Time Functions
@@ -19,18 +20,17 @@ uint32_t wireguard_sys_now() {
 }
 
 void wireguard_tai64n_now(uint8_t *output) {
-    // TAI64N format: 8 bytes seconds + 4 bytes nanoseconds
-    // For simplicity, use Unix epoch time
-    uint64_t now_us = esp_timer_get_time();
-    uint64_t seconds = now_us / 1000000ULL;
-    uint32_t nanoseconds = (now_us % 1000000ULL) * 1000;
-
-    // Log raw uptime before TAI offset (only every ~5s to avoid spam)
-    static uint64_t last_log_s = 0;
-    if (seconds - last_log_s >= 5) {
-        printf("[TAI64N] uptime=%llu s, nano=%lu\n", (unsigned long long)seconds, (unsigned long)nanoseconds);
-        last_log_s = seconds;
-    }
+    // TAI64N format: 8 bytes seconds + 4 bytes nanoseconds.
+    // MUST be wall-clock time: the responder rejects any initiation whose
+    // timestamp is not strictly greater than the last one it accepted for
+    // this static key, so a boot-relative clock (esp_timer_get_time) makes
+    // every post-reboot handshake look like a replay — the tunnel can then
+    // never re-establish against a long-running server. vpn_manager gates
+    // connecting on a valid system clock, so wall time is guaranteed here.
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    uint64_t seconds = (uint64_t)tv.tv_sec;
+    uint32_t nanoseconds = (uint32_t)tv.tv_usec * 1000;
 
     // TAI64 starts at 1970-01-01 00:00:10 TAI (Unix epoch + 10 seconds)
     // Add TAI offset: 2^62 + Unix time

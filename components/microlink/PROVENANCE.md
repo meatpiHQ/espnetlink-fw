@@ -109,22 +109,31 @@ noise/h2/udp/tcp/peer_nvs/zerocopy), `nacl_box.c`/`x25519.c` crypto,
 cellular (`ml_cellular.c`/`ml_at_socket.c`/`ml_net_switch.c` — built
 but unused on WiCAN; ML_ENABLE_CELLULAR=n). x25519-license.txt kept.
 
-## ESPNetLink port (IDF v5.5 / mbedtls 3.6, 2026-07-12)
+## ESPNetLink port (2026-07-12)
 
-Copied from the WiCAN v6 tree; the mbedTLS-4 adaptations of item 6
-above are reverted/bridged for classic mbedtls 3.x:
+Copied from the WiCAN v6 tree. The firmware was initially on IDF v5.5.3,
+which required bridging item 6's mbedTLS-4 adaptations back to classic
+mbedtls 3.x (public chacha headers, explicit `mbedtls_ssl_conf_rng` via
+`mbedtls_psa_get_random`, bundled `json` for cJSON). **Those bridges were
+removed the same day when the firmware moved to IDF v6.0.2** — `ml_noise.c`
+and `ml_derp.c` are byte-identical to the WiCAN v6 copies again, the
+CMakeLists carries the same tf-psa-crypto private-include dir, and cJSON is
+the `espressif/cjson` managed component (declared in this component's
+`idf_component.yml`).
 
-1. `CMakeLists.txt`: `espressif__cjson` → bundled `json` (upstream's
-   original dep; IDF v5.5 still bundles it), and the tf-psa-crypto
-   private-include-dir hack removed.
-2. `ml_noise.c`: `mbedtls/private/{chacha20,chachapoly}.h` →
-   the classic public `mbedtls/{chacha20,chachapoly}.h`.
-3. `ml_derp.c`: added `mbedtls_ssl_conf_rng(conf,
-   mbedtls_psa_get_random, MBEDTLS_PSA_RANDOM_STATE)` after
-   `mbedtls_ssl_config_defaults` — mbedtls 3.x requires an explicit
-   f_rng (MBEDTLS_ERR_SSL_NO_RNG otherwise); `psa_crypto_init()` kept.
+ESPNetLink-only deltas from the WiCAN v6 copy:
 
-Still required from the firmware's sdkconfig (WiCAN carries these in
-its root sdkconfig.defaults): `CONFIG_MBEDTLS_CHACHA20_C=y` and
-`CONFIG_MBEDTLS_CHACHAPOLY_C=y` (off by default; Noise_IK needs them).
-Everything else is byte-identical to the WiCAN v6 vendored copy.
+1. `ml_coord.c`: two raw NUL bytes typed inside char literals became
+   `'\0'` escapes (byte-identical object code; GCC 15 errors on raw NULs
+   in literals unless `COMPILER_DISABLE_DEFAULT_ERRORS` is set).
+
+Still required from the firmware's sdkconfig (root sdkconfig.defaults
+carries these): `CONFIG_MBEDTLS_CHACHA20_C=y` and
+`CONFIG_MBEDTLS_CHACHAPOLY_C=y` (off by default in mbedtls 4; Noise_IK
+needs them — POLY1305 is implied by CHACHAPOLY and no longer a kconfig
+symbol). Everything else is byte-identical to the WiCAN v6 vendored copy.
+
+Tailscale end-to-end re-verified on ESPNetLink hardware 2026-07-12:
+`tools/testbench/ts_bench_target.py` → **TS TARGET PASS** (register via
+LTE → tailnet IP → real tailscale 1.80 peer → ICMP 0 % loss + HTTP 200
+through the tunnel, DERP-relayed via headscale's embedded DERP).

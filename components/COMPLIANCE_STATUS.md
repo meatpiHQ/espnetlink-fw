@@ -1,7 +1,17 @@
 # MeatPi Component Standard — ESPNetLink compliance status
 
-Tracked against `MEATPI_COMPONENT_STANDARD.md` rev 1.0. Updated 2026-07-11
+Tracked against `MEATPI_COMPONENT_STANDARD.md` rev 1.0. Updated 2026-07-12
 (refactor branch). ✅ done · ◐ partial · ✗ open.
+
+**2026-07-12: migrated to ESP-IDF v6.0.2** (same as the WiCAN v6 reference):
+cJSON = `espressif/cjson` managed component, gpio/uart = split
+`esp_driver_*` components, mbedTLS 4 / TF-PSA-Crypto (PSA hash in the CDC
+OTA path), CI container = `espressif/idf:v6.0.2`. Verified same day:
+**19/19 host suites** (locally in the CI image), **8/8 on-target test_apps**
+on hardware, WireGuard **`VPN TARGET PASS`** over real LTE (which flushed
+out and fixed a real data-plane bug — see
+`vpn_manager/BUG_WG_NETIF_ADDR.md`), Tailscale **`TS TARGET PASS`** over
+real LTE vs self-hosted Headscale.
 
 ## Core platform (§"Core platform components", §4, §6, §6b, §9)
 
@@ -10,7 +20,7 @@ Tracked against `MEATPI_COMPONENT_STANDARD.md` rev 1.0. Updated 2026-07-11
 | settings_manager (dedicated `settings` partition, CRC, atomic, dedup, reboot-to-apply) | ✅ | Ported from WiCAN v6; verified on device (PUT dedup, pending_reboot, apply-at-boot) |
 | log_manager (vprintf hook, per-TAG table, sinks, PSRAM noinit ring) | ✅ | Ported; pipeline + ring live. Product boot default: level=info, console+ring sinks on |
 | cmdline_manager (registry + dispatcher) | ◐ | Ported and started (UART console default OFF — ESPNetLink deviation). Legacy esp> console still owns the product commands; migration below |
-| http_server_manager | ✅ | Ported; :80 live. IDF 5.5 note: WS pre-handshake gate is v6-only (frames still gated) |
+| http_server_manager | ✅ | Ported; :80 live. WS pre-handshake gate active since the IDF v6 move (it is `#if >= 6.0.0`-gated in the component) |
 | /api/settings HTTP API (§6) | ✅ | `api_http` port (settings surface). GET/PUT/schema/list/submit/backup/factory_reset verified on device over RNDIS |
 | wifi_manager + dev_status_manager | ✅ | AP `ESPNetLink_<tail>` @192.168.80.1 verified; STA/fallbacks available via settings. dev_status events glue = no-op (no event_manager here) |
 | restart_tracker (PSRAM-noinit reboot forensics; the ONE sanctioned reboot) | ✅ | Ported 2026-07-12; every reboot path routed through it (settings submit, factory reset, OTA apply, CLI reboot/wake, /api/restart). Device-verified: unplanned→user_request→config_apply→ota_apply records across real reboots |
@@ -20,7 +30,7 @@ Tracked against `MEATPI_COMPONENT_STANDARD.md` rev 1.0. Updated 2026-07-11
 | ha_webhooks (HA telemetry: /api/webhook + poster) | ✅ | ESPNetLink payload: status{identity, LTE fields, wifi_mode, vpn_*} + gps{} (never diffed). Bench-verified against a local fake HA: 201 registration, 5 s pushes, diff mode with identity overlay, gzip (415B vs 915B), 204 handling |
 | http_client_manager | ✅ | Ported; cert_manager sets unsupported (bundle-only TLS), download-to-file = ESP_ERR_NOT_SUPPORTED (no consumer) |
 | web_ui (browser settings/status/system UI at `/`) | ✅ | WiCAN v6 layout, ESPNetLink branding; nav pruned to Status/Settings/System/About; status page reads /api/lte + /api/gps + /api/vpn + /api/imu; gzip asset serving verified |
-| vpn_manager (WireGuard + Tailscale) + vendored esp_wireguard/wireguard_lwip/microlink | ✅ | Ported with 4 documented mbedtls-3.6 fixes in microlink (PROVENANCE.md); /api/vpn + keygen + settings schema live on device; tunnels not yet bench-tested against real endpoints |
+| vpn_manager (WireGuard + Tailscale) + vendored esp_wireguard/wireguard_lwip/microlink | ✅ | **Both tunnels bench-PASSED over real LTE (2026-07-12):** WireGuard `VPN TARGET PASS` (vpn_bench_target.py vs the bench wg server — found+fixed the netif-address data-plane bug, BUG_WG_NETIF_ADDR.md; WiCAN carries the same bug) and Tailscale `TS TARGET PASS` (ts_bench_target.py vs self-hosted Headscale: register → 100.64.0.1 → peer → ICMP 0% + HTTP 200 through the tunnel). microlink is byte-parity with WiCAN v6 again (the interim mbedtls-3.6 bridges were removed with the v6 move) |
 | imu_manager + i2c_bus (replaces the legacy imu component) | ✅ | SMD/WoM detectors, /api/imu (bench: gravity on Z, die temp), motion dev-status bit, `imu` CLI; ESPNetLink extension imu_manager_wom.c keeps `sleep 4` wake-on-motion working |
 | filesystem (FULL WiCAN core, replaces the shim) | ✅ | /data mount on the `storage` littlefs partition (same flash bytes, new VFS prefix), atomic writes, streams/async pipe, path validation, `fs` CLI + {cli} settings, /api/fs file manager. Device-verified: list/info/upload/delete + legacy config.json.imported visible at /data |
 | cert_manager (TLS certificate sets) | ✅ | /data/certs storage (WiCAN-verbatim), /api/certs surface device-verified (upload PEM → list → delete); http_client_manager cert_set TLS path re-enabled (was bundle-only), download() restored |
@@ -79,8 +89,8 @@ Tracked against `MEATPI_COMPONENT_STANDARD.md` rev 1.0. Updated 2026-07-11
 
 | Item | Status | Notes |
 |---|---|---|
-| Host unit tests + CI | ✅* | `.github/workflows/host-tests.yml` builds + runs all **17** host_test suites on the IDF `linux` target (espressif/idf:v5.5.3 container) on every push/PR — all 17 verified PASSING locally in the same image (2026-07-12). Suites `exit(UNITY_END())` so a failing test fails the job. *First CI run pending a push |
-| pytest test_apps on main sdkconfig/partitions | ✅ | 8 test_apps: 5 ported cores + restart_tracker (came with the port) + NEW filesystem + usb_dev_ethernet smokes (2026-07-12). All inherit repo-root sdkconfig.defaults + minimal overlay |
+| Host unit tests + CI | ✅* | `.github/workflows/host-tests.yml` builds + runs all **19** host_test suites on the IDF `linux` target (**espressif/idf:v6.0.2** container) on every push/PR — all 19 verified PASSING locally in the same image (2026-07-12, re-run after the v6 migration). Suites `exit(UNITY_END())` so a failing test fails the job. *First CI run pending a push |
+| pytest test_apps on main sdkconfig/partitions | ✅ | 8 test_apps: 5 ported cores + restart_tracker + filesystem + usb_dev_ethernet smokes. **All 8 PASS on hardware on IDF v6 (2026-07-12**, marker-verified over the UART; wifi suite needs a virgin settings partition — see its pytest note). All inherit repo-root sdkconfig.defaults + minimal overlay |
 
 ### Per-component coverage map
 
@@ -106,7 +116,7 @@ behavior is bench-verified today; on-target pytest apps are the backlog.
 | ota_manager | ✅ | WiCAN suite: pure session state machine (flash ops injected). HTTP path device-verified end-to-end |
 | mdns_manager | ✅ | WiCAN suite (hostname builders adapted to espnetlink_<id>) |
 | http_client_manager | ✅ | WiCAN suite: pure auth/url/base64 helpers |
-| vpn_manager | ✅ | WiCAN suite (pure config/state logic). Tunnels not yet exercised against live endpoints |
+| vpn_manager | ✅ | WiCAN suite (pure config/state logic). Both tunnel types bench-PASSED over real LTE 2026-07-12 (`VPN TARGET PASS` + `TS TARGET PASS`) |
 | ha_webhooks / multipart_upload / web_ui | — | Transport/UI glue; bench-verified live (fake-HA pushes incl. gzip + diff mode; multipart + raw OTA uploads; UI serving). esp_wireguard/wireguard_lwip/microlink are vendored engines (upstream provenance documented) |
 | usb_cli_console | ✅ | {cli} descriptor gate. Console core/OTA path is USB-bound — exercised on every bench OTA/CLI session |
 | filesystem | ✅ | WiCAN suites: 10 pure path-routing host tests + the full 13-marker on-target test_app (mount/atomic/list/validation/remount) |
@@ -124,9 +134,9 @@ behavior is bench-verified today; on-target pytest apps are the backlog.
   dev-status bit).
 - `vpn_manager`: rtc_manager absent → clock validity = `time(NULL)` sanity
   floor (LTE NITZ feeds settimeofday); event_manager glue no-op'd.
-- `microlink` (Tailscale engine): 4 mbedtls-3.6 compat fixes, documented in
-  its PROVENANCE.md (public chacha headers, PSA RNG conf, cJSON via bundled
-  json, tf-psa include hack removed).
+- `microlink` (Tailscale engine): byte-parity with the WiCAN v6 copy (the
+  interim mbedtls-3.6 bridges were removed with the IDF v6 move; see its
+  PROVENANCE.md, ESPNetLink port section).
 - `http_client_manager`: cert_manager sets unsupported (esp-tls bundle
   only); `download()` = ESP_ERR_NOT_SUPPORTED.
 - `imu_manager`: event_manager glue excluded; ESPNetLink gained
@@ -144,7 +154,13 @@ behavior is bench-verified today; on-target pytest apps are the backlog.
   carries boot logs + optional GPS NMEA routing.
 - `dev_status_manager` events glue is a no-op (no event_manager composed).
 - `api_http` delayed reboot uses esp_restart() (restart_tracker not ported yet).
-- IDF v5.5: bundled `json` for cJSON; WS pre-handshake gating unavailable.
+- AGNSS: this LC76G firmware build carries **EPOC, not EASY** (Quectel
+  AGNSS app note: one build has one of the two; PAIR491 → `$PAIR001,491,3`
+  = unsupported). agnss.c probes EASY → falls through to EPOC (PAIR508) —
+  bench module reports `EPOC enabled=1 constellation=0x1` (GPS-only
+  prediction). PAIR511 nav-data saves are shared by both. Future option:
+  Host EPO over LTE (the module requests it via `$PAIR010,0,<gnss>`;
+  needs a Quectel `vendorinfo` download credential).
 - Boot log default changed from silent (`esp_log_level_set("*", NONE)`) to
   INFO via log_manager settings — `debug 0/1` CLI still toggles globally, and
   `PUT /api/settings/log_manager {"level":"none"}` restores silence persistently.

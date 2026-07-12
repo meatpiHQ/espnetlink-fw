@@ -140,6 +140,33 @@ def main():
     print(ping.stdout.strip().splitlines()[-1] if ping.stdout else ping.stderr)
     assert " 0% packet loss" in ping.stdout, ping.stdout
 
+    # 5b. TAI64N regression (BUG_WG_NETIF_ADDR.md, second bug): reboot the
+    #     DUT against the SAME server state. Boot-relative handshake
+    #     timestamps get rejected as replays — re-handshake must succeed
+    #     without the peer being re-added.
+    print("rebooting DUT for the re-handshake check...")
+    try:
+        api("/api/restart", "POST", {})
+    except Exception:
+        pass
+    time.sleep(8)
+    wait_online()
+    st = {}
+    end = time.time() + 180
+    while time.time() < end:
+        try:
+            st = api("/api/vpn", timeout=5)
+            if st.get("state") == "connected":
+                break
+        except Exception:
+            pass
+        time.sleep(3)
+    assert st.get("state") == "connected", f"no re-handshake after reboot: {st}"
+    ping = pi(f"ping -c 3 -W 3 -I {SRV_TUN} {DUT_TUN}", timeout=30)
+    print("after reboot:",
+          ping.stdout.strip().splitlines()[-1] if ping.stdout else ping.stderr)
+    assert " 0% packet loss" in ping.stdout, ping.stdout
+
     # 6. teardown: DUT vpn off, bench peer removed (wg0.conf untouched)
     cfg["enabled"] = False
     api("/api/settings/vpn_manager", "PUT", cfg)

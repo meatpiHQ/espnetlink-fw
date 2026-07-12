@@ -138,7 +138,8 @@ static esp_err_t retry_init_step(const char *step_name,
         }
 
         if ((!retry_if_no_data && last_err == ESP_ERR_NOT_FOUND) ||
-            last_err == ESP_ERR_INVALID_ARG)
+            last_err == ESP_ERR_INVALID_ARG ||
+            last_err == ESP_ERR_NOT_SUPPORTED)
         {
             return last_err;
         }
@@ -391,6 +392,19 @@ static esp_err_t verify_easy_enabled(void)
             break;
         }
 
+        /* The module ACKs every PAIR command with $PAIR001,<cmd>,<status>.
+         * Status 0 = sent, 1 = processing (keep waiting for the report);
+         * 2-5 = failed/unsupported (protocol spec §2.4.1) — 3 is what the
+         * bench LC76G returns for 491 (EPOC build, no EASY). Don't burn
+         * the retry budget on a definitive rejection. */
+        if (strncmp(line, "$PAIR001,491,", 13) == 0 && line[13] >= '2')
+        {
+            ESP_LOGW(TAG, "EASY status query rejected by module (%s) – "
+                          "treating EASY as unsupported", line);
+            agnss_pair_lock_give();
+            return ESP_ERR_NOT_SUPPORTED;
+        }
+
         if (strncmp(line, "$PAIR491,", 9) == 0)
         {
             int enabled = -1, pred_valid = -1;
@@ -411,6 +425,82 @@ static esp_err_t verify_easy_enabled(void)
     }
 
     ESP_LOGW(TAG, "EASY status query timed out");
+    agnss_pair_lock_give();
+    return ESP_ERR_TIMEOUT;
+}
+
+/* An LC26G/LC76G/LC86G firmware build carries EITHER EASY or EPOC (Quectel
+ * AGNSS app note §1.2/§2.5: "EASY and EPOC cannot operate simultaneously
+ * within a single firmware") — when EASY reports unsupported, the module is
+ * likely an EPOC build. Query $PAIR508; enable via $PAIR496 if disabled.
+ * The periodic $PAIR511 navigation-data save is shared by both (§3.4). */
+static esp_err_t verify_epoc_status(void)
+{
+    esp_err_t lock_err = agnss_pair_lock_take(pdMS_TO_TICKS(3250));
+    if (lock_err != ESP_OK)
+    {
+        return lock_err;
+    }
+
+    char cmd[32];
+    agnss_build_pair_cmd(cmd, sizeof(cmd), "PAIR508");
+
+    esp_err_t err = gps_uart_write(cmd, strlen(cmd));
+    if (err != ESP_OK)
+    {
+        agnss_pair_lock_give();
+        return err;
+    }
+
+    ESP_LOGI(TAG, "Querying EPOC status (PAIR508)...");
+
+    /* Response: $PAIR508,<enabled>,<constellation-mask>*XX */
+    int64_t deadline = esp_timer_get_time() / 1000 + 3000;
+
+    while ((esp_timer_get_time() / 1000) < deadline)
+    {
+        uint32_t remaining = (uint32_t)(deadline - esp_timer_get_time() / 1000);
+        if (remaining == 0)
+        {
+            break;
+        }
+
+        char line[160];
+        if (gps_pair_response_wait(line, sizeof(line), remaining) != ESP_OK)
+        {
+            break;
+        }
+
+        /* status 0/1 = accepted/processing — keep waiting for $PAIR508 */
+        if (strncmp(line, "$PAIR001,508,", 13) == 0 && line[13] >= '2')
+        {
+            ESP_LOGW(TAG, "EPOC status query rejected by module (%s) – "
+                          "neither EASY nor EPOC available", line);
+            agnss_pair_lock_give();
+            return ESP_ERR_NOT_SUPPORTED;
+        }
+
+        if (strncmp(line, "$PAIR508,", 9) == 0)
+        {
+            int enabled = -1;
+            unsigned constellation = 0;
+            sscanf(line + 9, "%d,%x", &enabled, &constellation);
+            ESP_LOGI(TAG, "EPOC: enabled=%d constellation=0x%x",
+                     enabled, constellation);
+            if (enabled != 1)
+            {
+                ESP_LOGW(TAG, "EPOC not enabled – enabling now");
+                char ecmd[32];
+                agnss_build_pair_cmd(ecmd, sizeof(ecmd), "PAIR496,1");
+                agnss_pair_lock_give();
+                return pair_send_and_wait_ack(496, ecmd, 2000);
+            }
+            agnss_pair_lock_give();
+            return ESP_OK;
+        }
+    }
+
+    ESP_LOGW(TAG, "EPOC status query timed out");
     agnss_pair_lock_give();
     return ESP_ERR_TIMEOUT;
 }
@@ -610,11 +700,20 @@ static void agnss_init_task(void *arg)
         return;
     }
 
-    /* 1. Verify EASY is enabled on the LC76G */
-    (void)retry_init_step("EASY status query",
-                          verify_easy_enabled,
-                          AGNSS_INIT_STEP_RETRY_MS,
-                          true);
+    /* 1. Verify the self-assist prediction feature: EASY first; a build
+     *    that rejects it (PAIR001 status 3) carries EPOC instead. */
+    esp_err_t predict_err = retry_init_step("EASY status query",
+                                            verify_easy_enabled,
+                                            AGNSS_INIT_STEP_RETRY_MS,
+                                            true);
+
+    if (predict_err == ESP_ERR_NOT_SUPPORTED)
+    {
+        (void)retry_init_step("EPOC status query",
+                              verify_epoc_status,
+                              AGNSS_INIT_STEP_RETRY_MS,
+                              true);
+    }
 
     /* 2. Inject reference position from NVS (best-effort) */
     if (retry_init_step("Reference position injection",
