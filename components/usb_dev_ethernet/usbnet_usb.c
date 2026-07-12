@@ -17,17 +17,17 @@
 #include "esp_attr.h"
 #include "usbd_core.h"
 #include "usbd_cdc_acm.h"
-#include "usbd_rndis.h"
 
 #include "usb_cli_console.h"
 
+#include "private/usbnet_class.h"
 #include "private/usbnet_dns_proxy.h"
 #include "private/usbnet_lwip.h"
 #include "private/usbnet_state.h"
 
 static const char *TAG = "usb_dev_ethernet";
 
-// RNDIS endpoints
+// USB Ethernet function endpoints (same triple for ECM and RNDIS)
 #define CDC_IN_EP  0x81
 #define CDC_OUT_EP 0x02
 #define CDC_INT_EP 0x83
@@ -38,7 +38,9 @@ static const char *TAG = "usb_dev_ethernet";
 #define USBD_MAX_POWER_MA 100
 
 #define USB_STRING_SERIAL_INDEX       0x03
-#define USB_STRING_RNDIS_INTF_INDEX   0x04
+/* index 4: RNDIS = interface name string; ECM = the iMACAddress string
+ * (12 hex chars) that tells the host which MAC its adapter should use */
+#define USB_STRING_ETH_INTF_INDEX     0x04
 #define USB_STRING_CONSOLE_INTF_INDEX 0x05
 
 #ifdef CONFIG_USB_HS
@@ -47,14 +49,24 @@ static const char *TAG = "usb_dev_ethernet";
 #define CDC_MAX_MPS 64
 #endif
 
-#define USB_CONFIG_SIZE_RNDIS     (9 + CDC_RNDIS_DESCRIPTOR_LEN)
-#define USB_CONFIG_SIZE_RNDIS_CDC (9 + CDC_RNDIS_DESCRIPTOR_LEN + CDC_ACM_DESCRIPTOR_LEN)
+#if CONFIG_USBNET_CLASS_ECM
+#define USBNET_ETH_DESCRIPTOR_LEN CDC_ECM_DESCRIPTOR_LEN
+#define USBNET_ETH_DESCRIPTOR_INIT(first, int_ep, out_ep, in_ep, mps, str) \
+    CDC_ECM_DESCRIPTOR_INIT(first, int_ep, out_ep, in_ep, mps, str)
+#else
+#define USBNET_ETH_DESCRIPTOR_LEN CDC_RNDIS_DESCRIPTOR_LEN
+#define USBNET_ETH_DESCRIPTOR_INIT(first, int_ep, out_ep, in_ep, mps, str) \
+    CDC_RNDIS_DESCRIPTOR_INIT(first, int_ep, out_ep, in_ep, mps, str)
+#endif
+
+#define USB_CONFIG_SIZE_ETH     (9 + USBNET_ETH_DESCRIPTOR_LEN)
+#define USB_CONFIG_SIZE_ETH_CDC (9 + USBNET_ETH_DESCRIPTOR_LEN + CDC_ACM_DESCRIPTOR_LEN)
 
 static bool s_console_enabled = false;
 
-// RNDIS is a 2-interface function (control+data)
-static struct usbd_interface s_rndis_intf0;
-static struct usbd_interface s_rndis_intf1;
+// Both ECM and RNDIS are 2-interface functions (control+data)
+static struct usbd_interface s_eth_intf0;
+static struct usbd_interface s_eth_intf1;
 
 static TaskHandle_t s_rx_task = NULL;
 static TaskHandle_t s_evt_task = NULL;
