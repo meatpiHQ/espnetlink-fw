@@ -21,9 +21,141 @@
 #include "lwip/ip_addr.h"
 #include "ping/ping_sock.h"
 
+#include "iperf.h"
+
 #include "cmdline_manager.h"
 
 #include "main_compose.h"
+
+// ---------------------------------------------------------------------------
+// iperf (espressif/iperf managed component). Speaks the iperf2 protocol —
+// the peer must run iperf 2.x, NOT iperf3. Reports print asynchronously to
+// the console until the run ends or `iperf -a` aborts it. Works across any
+// routable path: RNDIS (PC 192.168.7.2), the AP, LTE, or a VPN tunnel IP.
+// ---------------------------------------------------------------------------
+
+static int cmd_iperf(int argc, char **argv)
+{
+    bool server = false;
+    bool client = false;
+    bool udp = false;
+    const char *dest = NULL;
+    long port = IPERF_DEFAULT_PORT;
+    long interval = IPERF_DEFAULT_INTERVAL;
+    long duration = IPERF_DEFAULT_TIME;
+    long bw_mbps = -1;
+    long buf_len = 0;   /* 0 = component default (16 KB with PSRAM) */
+    long task_prio = 0; /* 0 = component default (4) */
+    bool bad = false;
+
+    for (int i = 1; i < argc && !bad; i++)
+    {
+        if (strcmp(argv[i], "-s") == 0)
+        {
+            server = true;
+        }
+        else if (strcmp(argv[i], "-c") == 0 && i + 1 < argc)
+        {
+            client = true;
+            dest = argv[++i];
+        }
+        else if (strcmp(argv[i], "-u") == 0)
+        {
+            udp = true;
+        }
+        else if (strcmp(argv[i], "-a") == 0)
+        {
+            (void)iperf_stop_instance(IPERF_ALL_INSTANCES_ID);
+            printf("iperf: all instances stopped\n");
+            return 0;
+        }
+        else if (strcmp(argv[i], "-p") == 0 && i + 1 < argc)
+        {
+            port = strtol(argv[++i], NULL, 10);
+        }
+        else if (strcmp(argv[i], "-i") == 0 && i + 1 < argc)
+        {
+            interval = strtol(argv[++i], NULL, 10);
+        }
+        else if (strcmp(argv[i], "-t") == 0 && i + 1 < argc)
+        {
+            duration = strtol(argv[++i], NULL, 10);
+        }
+        else if (strcmp(argv[i], "-b") == 0 && i + 1 < argc)
+        {
+            bw_mbps = strtol(argv[++i], NULL, 10);
+        }
+        else if (strcmp(argv[i], "-l") == 0 && i + 1 < argc)
+        {
+            buf_len = strtol(argv[++i], NULL, 10);
+        }
+        else if (strcmp(argv[i], "-P") == 0 && i + 1 < argc)
+        {
+            task_prio = strtol(argv[++i], NULL, 10);
+        }
+        else
+        {
+            bad = true;
+        }
+    }
+
+    if (bad || server == client || port < 1 || port > 65535 ||
+        interval < 1 || duration < 1 || buf_len < 0 || buf_len > 65535 ||
+        task_prio < 0 || task_prio > 23)
+    {
+        printf("Usage: iperf -s | -c <ip> [-u] [-p port] [-i sec] [-t sec]"
+               " [-b mbps] [-l bytes] [-P prio] | -a\n"
+               "  -s server, -c client to <ip>, -u UDP (default TCP),\n"
+               "  -l send-buffer bytes, -P traffic-task priority,\n"
+               "  -a abort running instances. Peer runs iperf 2.x.\n");
+        return 1;
+    }
+
+    iperf_cfg_t cfg = { 0 };
+
+    cfg.flag = (udp ? IPERF_FLAG_UDP : IPERF_FLAG_TCP) |
+               (server ? IPERF_FLAG_SERVER : IPERF_FLAG_CLIENT);
+    cfg.format = MBITS_PER_SEC;
+    cfg.interval = (uint32_t)interval;
+    cfg.time = (uint32_t)duration;
+    cfg.bw_lim = bw_mbps > 0 ? (int32_t)(bw_mbps * 1000000)
+                             : IPERF_DEFAULT_NO_BW_LIMIT;
+    cfg.len_send_buf = (uint16_t)buf_len;            /* 0 = default */
+    cfg.traffic_task_priority = (uint8_t)task_prio;  /* 0 = default */
+
+    if (client)
+    {
+        uint32_t addr = ipaddr_addr(dest);
+
+        if (addr == IPADDR_NONE)
+        {
+            printf("iperf: bad address '%s'\n", dest);
+            return 1;
+        }
+        cfg.destination.type = ESP_IPADDR_TYPE_V4;
+        cfg.destination.u_addr.ip4.addr = addr;
+        cfg.dport = (uint16_t)port;
+    }
+    else
+    {
+        cfg.source.type = ESP_IPADDR_TYPE_V4; /* 0.0.0.0 = all netifs */
+        cfg.sport = (uint16_t)port;
+    }
+
+    iperf_id_t id = iperf_start_instance(&cfg);
+
+    if (id < 0)
+    {
+        printf("iperf: start failed\n");
+        return 1;
+    }
+
+    printf("iperf %s started: %s port %ld, %ld s, report every %ld s"
+           " (id %d; `iperf -a` to stop)\n",
+           server ? "server" : "client", udp ? "UDP" : "TCP",
+           port, duration, interval, id);
+    return 0;
+}
 
 // ---------------------------------------------------------------------------
 // Ping
@@ -340,6 +472,14 @@ static int cmd_speedtest(int argc, char **argv)
 
 esp_err_t main_cli_register_net(void)
 {
+    static const esp_console_cmd_t CMD_IPERF = {
+        .command = "iperf",
+        .help    = "iperf2 throughput test. -s server | -c <ip> client; "
+                   "-u UDP, -p port, -i report secs, -t duration secs, "
+                   "-b Mbit/s (client), -a abort. Peer must run iperf 2.x",
+        .hint    = "-s|-c <ip>|-a [-u] [-p port] [-i s] [-t s] [-b mbps]",
+        .func    = &cmd_iperf,
+    };
     static const esp_console_cmd_t CMD_PING = {
         .command = "ping",
         .help    = "ICMP ping. Usage: ping [ip] [-c count] [-i interval_ms]. Default: 8.8.8.8 x4",
@@ -358,6 +498,10 @@ esp_err_t main_cli_register_net(void)
     if (err == ESP_OK)
     {
         err = cmdline_manager_register(&CMD_SPEEDTEST);
+    }
+    if (err == ESP_OK)
+    {
+        err = cmdline_manager_register(&CMD_IPERF);
     }
 
     return err;

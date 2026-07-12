@@ -12,3 +12,7 @@ dependencies:
   joltwallet/littlefs: ^1.20.4
   ## IDF v6 dropped the bundled `json` component; cJSON comes from the registry.
   espressif/cjson: "^1.7.18"
+  ## `iperf` console command — link throughput testing (PC over RNDIS/AP,
+  ## device-to-device, or through the VPN tunnel). iperf2 protocol: use
+  ## iperf 2.x on the peer, NOT iperf3.
+  espressif/iperf: "^1.0.2"

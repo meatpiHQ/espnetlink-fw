@@ -46,6 +46,16 @@ dependencies:
     - esp32h4
     - esp32s31
     version: 2.2.1
+  espressif/iperf:
+    component_hash: 7ee222b87da6e69118814a1e04fbc6e0af6814cdd364f7f51cb58770d2478224
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.3'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.0.2
   espressif/mdns:
     component_hash: e81ca7a7f53ea34e78274df054da692c272e1315572876b237b1748e267c013b
     dependencies:
@@ -192,6 +202,7 @@ direct_dependencies:
 - espressif/cjson
 - espressif/esp_modem
 - espressif/esp_tinyusb
+- espressif/iperf
 - espressif/mdns
 - espressif/usb_host_cdc_acm
 - espressif/usb_host_ch34x_vcp
@@ -201,6 +212,6 @@ direct_dependencies:
 - idf
 - igrr/libnmea
 - joltwallet/littlefs
-manifest_hash: 4bcd4b4fb6bb4221670ec81e1543a8c22ac548272f80db531e0c07d93e32362d
+manifest_hash: afbea3b914028cba1bb24e63ec04ab5a73402beea5f2562ebbadced88b42534b
 target: esp32s3
 version: 3.0.0

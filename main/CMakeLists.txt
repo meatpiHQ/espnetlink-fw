@@ -13,7 +13,7 @@ idf_component_register(
              ota_manager ha_webhooks mdns_manager web_ui http_client_manager
              esp_netif esp_event
              console espressif__cjson esp_http_client esp-tls lwip esp_timer
-             esp_driver_gpio esp_driver_uart
+             esp_driver_gpio esp_driver_uart espressif__iperf
              esp_hw_support
 )
 
