@@ -2,10 +2,20 @@
  * @file vpn_manager_wg.c
  * @brief esp_wireguard glue (legacy vpn_wireguard.c semantics kept):
  *        endpoint resolved to IPv4 once per up (the port doesn't
- *        resolve internally), AllowedIPs=0.0.0.0 falls back to the
- *        interface address /32 (esp_wireguard uses allowed_ip as the
- *        LOCAL tunnel IP), peer-up = the wireguardif poll. Called from
- *        the state task ONLY.
+ *        resolve internally), peer-up = the wireguardif poll. Called
+ *        from the state task ONLY.
+ *
+ *        esp_wireguard's allowed_ip/allowed_ip_mask configure the lwIP
+ *        netif, NOT a WireGuard AllowedIPs route: allowed_ip becomes
+ *        the netif's LOCAL address (netif_add uses it directly) and
+ *        the mask is what steers tunnel-subnet destinations into the
+ *        netif (dest & mask == addr & mask). So the netif IP is ALWAYS
+ *        Interface.Address; the user's AllowedIPs contributes only the
+ *        netmask, and 0.0.0.0 (the route-everything idiom) falls back
+ *        to /32 — the default_route flag handles it. Passing the
+ *        AllowedIPs NETWORK address through instead brought the netif
+ *        up as e.g. 10.8.0.0 and silently killed the whole data plane
+ *        (BUG_WG_NETIF_ADDR.md).
  */
 #include <string.h>
 
@@ -84,14 +94,8 @@ esp_err_t vpn_wg_up(const vpn_config_t *cfg)
         s_cfg.preshared_key = s_psk;
     }
 
-    /* esp_wireguard's allowed_ip is the LOCAL netif IP (upstream field name;
-     * esp_wireguard.h: "a local IP address") — it must ALWAYS be
-     * Interface.Address. AllowedIPs contributes only the netif MASK: lwip
-     * routes dest&mask == addr&mask into the tunnel. Passing the AllowedIPs
-     * NETWORK address as the netif IP (the old behaviour, WiCAN too) brought
-     * the interface up as e.g. 10.8.0.0 — inbound tunnel packets to the real
-     * address were never "for us" and replies never routed back
-     * (data-plane bug found on the 2026-07-12 LTE bench). */
+    /* Netif IP = ALWAYS Interface.Address (see the file header); the
+     * user's AllowedIPs contributes only the netmask */
     strlcpy(s_addr, cfg->address, sizeof(s_addr));
 
     char *slash = strchr(s_addr, '/');
@@ -107,19 +111,16 @@ esp_err_t vpn_wg_up(const vpn_config_t *cfg)
         strcmp(cfg->allowed_ip, "0.0.0.0") != 0 &&
         cfg->allowed_ip_mask[0] != '\0')
     {
-        /* route the AllowedIPs subnet via the tunnel */
         strlcpy(s_mask, cfg->allowed_ip_mask, sizeof(s_mask));
         s_cfg.allowed_ip_mask = s_mask;
-        ESP_LOGI(TAG, "WG netif %s mask %s (AllowedIPs %s)", s_addr, s_mask,
-                 cfg->allowed_ip);
     }
     else
     {
-        /* 0.0.0.0 (route-everything idiom) or none: /32 — the
-         * default_route flag decides whether everything rides the tunnel */
         s_cfg.allowed_ip_mask = "255.255.255.255";
-        ESP_LOGI(TAG, "local WG IP from address: %s/32", s_addr);
     }
+
+    ESP_LOGI(TAG, "WG netif %s mask %s (AllowedIPs %s)", s_addr,
+             s_cfg.allowed_ip_mask, cfg->allowed_ip);
 
     if (!resolve_ipv4(cfg->endpoint, s_endpoint, sizeof(s_endpoint)))
     {

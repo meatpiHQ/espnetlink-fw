@@ -443,9 +443,6 @@ static void wireguardif_process_data_message(struct wireguard_device *device, st
 
 	keypair = get_peer_keypair_for_idx(peer, idx);
 
-	if (!keypair) {
-		printf("[WG_RX] DATA dropped: no keypair for idx=%lu\n", (unsigned long)idx);
-	}
 	if (keypair) {
 		if (
 				(keypair->receiving_valid) &&
@@ -460,10 +457,6 @@ static void wireguardif_process_data_message(struct wireguard_device *device, st
 
 			// We don't know the unpadded size until we have decrypted the packet and validated/inspected the IP header
 			pbuf = pbuf_alloc(PBUF_TRANSPORT, src_len - WIREGUARD_AUTHTAG_LEN, PBUF_RAM);
-			if (!pbuf) {
-				printf("[WG_RX] DATA dropped: pbuf_alloc(%u) failed\n",
-					(unsigned)(src_len - WIREGUARD_AUTHTAG_LEN));
-			}
 			if (pbuf) {
 				// Decrypt the packet
 				memset(pbuf->payload, 0, pbuf->tot_len);
@@ -568,6 +561,8 @@ static void wireguardif_process_data_message(struct wireguard_device *device, st
 				if (pbuf) {
 					pbuf_free(pbuf);
 				}
+			} else {
+				printf("[WG_RX] DATA dropped: pbuf_alloc failed (len=%u)\n", (unsigned)src_len);
 			}
 
 
@@ -580,6 +575,7 @@ static void wireguardif_process_data_message(struct wireguard_device *device, st
 
 	} else {
 		// Could not locate valid keypair for remote index
+		printf("[WG_RX] DATA dropped: no keypair for receiver_idx=%lu\n", (unsigned long)idx);
 	}
 }
 
@@ -857,8 +853,7 @@ void wireguardif_network_rx(void *arg, struct udp_pcb *pcb, struct pbuf *p, cons
 				// header is 16 bytes long so take that off the length
 				wireguardif_process_data_message(device, peer, msg_data, len - 16, addr, port);
 			} else {
-				printf("[WG_RX] DATA dropped: no peer for receiver_idx=%lu\n",
-					(unsigned long)msg_data->receiver);
+				printf("[WG_RX] DATA dropped: no peer for receiver_idx=%lu\n", (unsigned long)msg_data->receiver);
 			}
 			break;
 
