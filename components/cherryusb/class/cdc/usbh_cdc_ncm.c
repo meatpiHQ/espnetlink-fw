@@ -408,7 +408,22 @@ int usbh_cdc_ncm_eth_output(uint32_t buflen)
     USB_LOG_DBG("txlen:%d\r\n", nth16->wBlockLength);
 
     usbh_bulk_urb_fill(&g_cdc_ncm_class.bulkout_urb, g_cdc_ncm_class.hport, g_cdc_ncm_class.bulkout, g_cdc_ncm_tx_buffer, nth16->wBlockLength, USB_OSAL_WAITING_FOREVER, NULL, NULL);
-    return usbh_submit_urb(&g_cdc_ncm_class.bulkout_urb);
+    int ret = usbh_submit_urb(&g_cdc_ncm_class.bulkout_urb);
+
+    /* WICAN FIX (BUG_NCM_HOST_TX_ZLP.md, PROVENANCE.md): NCM 1.0 §3.2.2
+     * — an NTB whose length is an exact multiple of the bulk MPS must be
+     * terminated with a ZLP, or the device's OUT transfer never
+     * completes and the frame is silently swallowed. Found live: a DHCP
+     * DISCOVER frames to wBlockLength 384 = 6 x 64 (FS MPS) exactly, so
+     * DHCP over NCM host mode never got a lease while odd-sized frames
+     * (ARP/ICMP) passed. The device side (usbd_cdc_ncm.c) already sends
+     * the mirror-image ZLP on its TX. */
+    if (ret >= 0 && (nth16->wBlockLength % USB_GET_MAXPACKETSIZE(g_cdc_ncm_class.bulkout->wMaxPacketSize)) == 0) {
+        usbh_bulk_urb_fill(&g_cdc_ncm_class.bulkout_urb, g_cdc_ncm_class.hport, g_cdc_ncm_class.bulkout, g_cdc_ncm_tx_buffer, 0, USB_OSAL_WAITING_FOREVER, NULL, NULL);
+        ret = usbh_submit_urb(&g_cdc_ncm_class.bulkout_urb);
+    }
+
+    return ret;
 }
 
 __WEAK void usbh_cdc_ncm_run(struct usbh_cdc_ncm *cdc_ncm_class)
