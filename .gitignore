@@ -71,3 +71,4 @@ tools/https_test_server/test_certs/
 # Vendor datasheets/app notes (Quectel docs carry a confidentiality notice —
 # keep them local, don't publish; cite title + section in code comments)
 **/quectel_*.pdf
+components/notes/
