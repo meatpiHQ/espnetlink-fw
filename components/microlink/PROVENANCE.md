@@ -126,6 +126,22 @@ ESPNetLink-only deltas from the WiCAN v6 copy:
 1. `ml_coord.c`: two raw NUL bytes typed inside char literals became
    `'\0'` escapes (byte-identical object code; GCC 15 errors on raw NULs
    in literals unless `COMPILER_DISABLE_DEFAULT_ERRORS` is set).
+2. **Peer-cache NVS wear guard (2026-07-12, `ml_peer_nvs.c` — WiCAN
+   should take this too):** `ml_peer_nvs_save()` now skips the blob
+   flush when the peer entry is unchanged apart from the LRU stamp —
+   upstream rewrote the whole table once per peer per full netmap
+   (i.e. every reconnect), because the embedded `lru_counter` made the
+   blob differ every time. Recency is bumped in RAM only and persisted
+   piggybacked on the next real change (only affects eviction order).
+3. **Phantom-peer fix (2026-07-12, `BUG_TS_PHANTOM_PEERS.md` — WiCAN
+   should take this):** full netmaps now mark-and-sweep
+   (`ML_PEER_SYNC_BEGIN/END/ABORT` through the peer-update queue) so
+   peers the control server no longer lists are pruned, and
+   `remove_peer` also drops the peer's NVS cache entry
+   (`ml_peer_nvs_remove`) so removals survive reboots. Upstream
+   treated every peer list as add-only and never removed cache
+   entries — deleted-while-offline peers were DISCO/DERP-probed
+   forever and resurrected from NVS on every boot.
 
 Still required from the firmware's sdkconfig (root sdkconfig.defaults
 carries these): `CONFIG_MBEDTLS_CHACHA20_C=y` and
