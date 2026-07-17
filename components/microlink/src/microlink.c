@@ -134,11 +134,21 @@ static void *cjson_psram_malloc(size_t size) {
 #define ML_PSRAM_TASKS 3
 static StaticTask_t s_ml_tcb[ML_PSRAM_TASKS];   /* internal: FreeRTOS TCB */
 static StackType_t *s_ml_stack[ML_PSRAM_TASKS]; /* PSRAM stack buffers    */
+/* Slot whose task failed to join in microlink_stop(): the task may still
+ * be alive on this stack/TCB, so the stack is never freed and the slot is
+ * never reused (see notes/BUG_TS_DNS_FOUND_CRASH.md). Only reboot clears. */
+static bool s_ml_slot_leaked[ML_PSRAM_TASKS];
 
 static bool ml_start_psram_task(TaskFunction_t fn, const char *name,
                                 uint32_t stack_bytes, void *arg,
                                 UBaseType_t prio, TaskHandle_t *out,
                                 BaseType_t core, int slot) {
+    if (s_ml_slot_leaked[slot]) {
+        ESP_LOGE(TAG, "PSRAM task slot %d poisoned by an unjoined task; "
+                      "refusing to reuse (reboot to recover)", slot);
+        return false;
+    }
+
     StackType_t *stk = heap_caps_malloc(stack_bytes,
                                          MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (stk == NULL) {
@@ -160,10 +170,20 @@ static bool ml_start_psram_task(TaskFunction_t fn, const char *name,
 
 static void ml_free_psram_task_stacks(void) {
     for (int i = 0; i < ML_PSRAM_TASKS; i++) {
-        if (s_ml_stack[i] != NULL) {
+        if (s_ml_stack[i] != NULL && !s_ml_slot_leaked[i]) {
             heap_caps_free(s_ml_stack[i]);
             s_ml_stack[i] = NULL;
         }
+    }
+}
+
+/* Task-exit handshake (see microlink_internal.h). Parking instead of
+ * vTaskDelete(NULL) lets microlink_stop() delete the task while it is
+ * provably NOT running, which makes freeing its PSRAM stack safe. */
+void ml_task_exit(microlink_t *ml, EventBits_t exit_bit) {
+    xEventGroupSetBits(ml->events, exit_bit);
+    for (;;) {
+        vTaskSuspend(NULL);
     }
 }
 
@@ -486,23 +506,79 @@ skip_bsd_socket:
     return ESP_OK;
 }
 
+/* Join budget: must comfortably exceed the longest blocking call a worker
+ * can sit in after ML_EVT_SHUTDOWN_REQUEST — the worst is a plain-lwip
+ * getaddrinfo() (no timeout knob), bounded by the lwip DNS retry schedule
+ * at ~16 s over a dead uplink. */
+#define ML_TASK_JOIN_TIMEOUT_MS 30000
+
 esp_err_t microlink_stop(microlink_t *ml) {
     if (!ml) return ESP_ERR_INVALID_ARG;
 
     ESP_LOGI(TAG, "Stopping...");
     xEventGroupSetBits(ml->events, ML_EVT_SHUTDOWN_REQUEST);
 
-    /* Wait for tasks to exit (they check ML_EVT_SHUTDOWN_REQUEST).
-     * Tasks call vTaskDelete(NULL) to self-delete, so we must NOT call
-     * vTaskDelete() on them again — that causes a crash in uxListRemove
-     * because the task's list node is already invalid. Just wait and
-     * NULL the handles. */
-    vTaskDelay(pdMS_TO_TICKS(3000));
+    /* Join the tasks for real. Each task signals its exit bit and parks in
+     * ml_task_exit(); once a task is provably parked we delete it here.
+     * The old blind 3 s grace period was NOT a join: a worker inside a
+     * blocking getaddrinfo() outlived it, and freeing its PSRAM stack then
+     * left the lwip DNS found-callback pointing into freed memory
+     * (StoreProhibited in dns_tmr — notes/BUG_TS_DNS_FOUND_CRASH.md). */
+    const struct {
+        TaskHandle_t *handle;
+        EventBits_t bit;
+        int psram_slot; /* -1 = dynamic stack (freed by the kernel) */
+        const char *name;
+    } join[] = {
+        { &ml->net_io_task,  ML_EVT_NET_IO_EXITED,  0,  "net_io"  },
+        { &ml->derp_tx_task, ML_EVT_DERP_TX_EXITED, 1,  "derp_tx" },
+        { &ml->coord_task,   ML_EVT_COORD_EXITED,   2,  "coord"   },
+        { &ml->wg_mgr_task,  ML_EVT_WG_MGR_EXITED,  -1, "wg_mgr"  },
+    };
 
-    ml->net_io_task = NULL;
-    ml->derp_tx_task = NULL;
-    ml->coord_task = NULL;
-    ml->wg_mgr_task = NULL;
+    EventBits_t want = 0;
+    for (size_t i = 0; i < sizeof(join) / sizeof(join[0]); i++) {
+        if (*join[i].handle != NULL) {
+            want |= join[i].bit;
+        }
+    }
+
+    EventBits_t got = 0;
+    if (want != 0) {
+        got = xEventGroupWaitBits(ml->events, want, pdFALSE, pdTRUE,
+                                  pdMS_TO_TICKS(ML_TASK_JOIN_TIMEOUT_MS));
+    }
+
+    for (size_t i = 0; i < sizeof(join) / sizeof(join[0]); i++) {
+        TaskHandle_t h = *join[i].handle;
+        if (h == NULL) {
+            continue;
+        }
+        if (got & join[i].bit) {
+            /* Exit bit set; wait for the final park (the window between
+             * xEventGroupSetBits and vTaskSuspend in ml_task_exit). */
+            int spins = 0;
+            while (eTaskGetState(h) != eSuspended && ++spins < 100) {
+                vTaskDelay(1);
+            }
+            if (eTaskGetState(h) == eSuspended) {
+                vTaskDelete(h); /* not running: stack is now truly idle */
+                *join[i].handle = NULL;
+                continue;
+            }
+        }
+        /* Task never signalled (or never parked): it may still be blocked
+         * in lwip with stack-resident state registered in the DNS table.
+         * Leak its stack and everything it can reach — never free. */
+        ESP_LOGE(TAG, "Task %s failed to join within %d ms — leaking its "
+                      "stack and shared microlink resources",
+                 join[i].name, ML_TASK_JOIN_TIMEOUT_MS);
+        if (join[i].psram_slot >= 0) {
+            s_ml_slot_leaked[join[i].psram_slot] = true;
+        }
+        ml->tasks_leaked = true;
+        *join[i].handle = NULL;
+    }
 
     /* Stop HTTP config server */
     if (ml->config_httpd) {
@@ -529,8 +605,18 @@ void microlink_destroy(microlink_t *ml) {
 
     microlink_stop(ml);
 
+    if (ml->tasks_leaked) {
+        /* A task failed to join — it may still wake up and touch the
+         * event group, queues, sockets, or its own stack. Leak the whole
+         * microlink instance rather than freeing memory under a live
+         * task (notes/BUG_TS_DNS_FOUND_CRASH.md). ~40 KB lost until
+         * reboot on a path that should never be hit. */
+        ESP_LOGE(TAG, "Leaking microlink instance: unjoined task(s)");
+        return;
+    }
+
     /* WiCAN: PSRAM task stacks are ours to free — safe now that
-     * microlink_stop() waited for the tasks to self-delete */
+     * microlink_stop() joined and deleted the (parked) tasks */
     ml_free_psram_task_stacks();
 
     /* Deinitialize peer NVS */

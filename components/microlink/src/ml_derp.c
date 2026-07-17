@@ -650,7 +650,7 @@ void ml_derp_tx_task(void *arg) {
     }
 
     ESP_LOGI(TAG, "DERP I/O task exiting");
-    vTaskDelete(NULL);
+    ml_task_exit(ml, ML_EVT_DERP_TX_EXITED);
 }
 
 /* ============================================================================

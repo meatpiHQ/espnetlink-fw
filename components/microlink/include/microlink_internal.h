@@ -26,6 +26,7 @@
 #include "mbedtls/ssl.h"
 #include "psa/crypto.h"
 #include "esp_heap_caps.h"
+#include "esp_log.h"
 
 #ifdef CONFIG_ML_ZERO_COPY_WG
 #include "lwip/udp.h"
@@ -180,6 +181,17 @@ typedef struct {
 #define ML_EVT_SHUTDOWN_REQUEST     BIT6
 #define ML_EVT_DERP_RECONNECT       BIT7
 #define ML_EVT_DERP_CONNECT_REQ     BIT8
+
+/* Task-exit handshake bits: each managed task sets its bit via
+ * ml_task_exit() instead of vTaskDelete(NULL); microlink_stop() joins on
+ * them before the PSRAM stacks are freed. A blind grace delay is NOT a
+ * join — a worker parked in a blocking getaddrinfo() outlives it and the
+ * lwip DNS retry callback then writes into its freed stack frame
+ * (see notes/BUG_TS_DNS_FOUND_CRASH.md). */
+#define ML_EVT_NET_IO_EXITED        BIT9
+#define ML_EVT_DERP_TX_EXITED       BIT10
+#define ML_EVT_COORD_EXITED         BIT11
+#define ML_EVT_WG_MGR_EXITED        BIT12
 
 /* ============================================================================
  * Queue Message Types
@@ -358,6 +370,11 @@ struct microlink_s {
     TaskHandle_t coord_task;
     TaskHandle_t wg_mgr_task;
 
+    /* Set when microlink_stop() gave up joining a task: its stack (and
+     * every shared resource it might still touch) must be leaked, not
+     * freed — see notes/BUG_TS_DNS_FOUND_CRASH.md. */
+    bool tasks_leaked;
+
     /* Queues */
     QueueHandle_t derp_tx_queue;        /* -> derp_tx task */
     QueueHandle_t disco_rx_queue;       /* net_io -> wg_mgr */
@@ -503,6 +520,12 @@ struct microlink_s {
 /* ============================================================================
  * Internal Function Declarations (per-module)
  * ========================================================================== */
+
+/* microlink.c — task-exit handshake. Managed tasks (net_io/derp_tx/
+ * coord/wg_mgr) MUST end with this instead of vTaskDelete(NULL): it
+ * signals the exit bit and parks the task; microlink_stop() deletes the
+ * parked task and only then frees its stack. Never returns. */
+void ml_task_exit(microlink_t *ml, EventBits_t exit_bit) __attribute__((noreturn));
 
 /* ml_net_io.c */
 void ml_net_io_task(void *arg);
@@ -677,7 +700,13 @@ static inline int ml_getaddrinfo(const char *host, const char *svc,
                                    struct addrinfo **res) {
     if (ml_at_socket_is_ready())
         return ml_at_getaddrinfo(host, svc, hints, res);
-    return getaddrinfo(host, svc, hints, res);
+    /* lwip path: begin/end markers name the task parked in a blocking
+     * resolve — a "begin" with no "end" is a query still registered in
+     * the lwip DNS table (see notes/BUG_TS_DNS_FOUND_CRASH.md). */
+    ESP_LOGD("ml_dns", "getaddrinfo(%s) begin [%s]", host, pcTaskGetName(NULL));
+    int rc = getaddrinfo(host, svc, hints, res);
+    ESP_LOGD("ml_dns", "getaddrinfo(%s) end rc=%d [%s]", host, rc, pcTaskGetName(NULL));
+    return rc;
 }
 
 static inline void ml_freeaddrinfo(struct addrinfo *res) {
@@ -704,6 +733,9 @@ static inline ssize_t ml_read_sock(int fd, void *buf, size_t len) {
 
 #else
 /* Non-cellular builds: direct pass-through (zero overhead) */
+#include <sys/socket.h>
+#include <netdb.h>
+
 #define ml_socket       socket
 #define ml_connect      connect
 #define ml_send         send
@@ -715,10 +747,21 @@ static inline ssize_t ml_read_sock(int fd, void *buf, size_t len) {
 #define ml_setsockopt   setsockopt
 #define ml_fcntl        fcntl
 #define ml_select_fds   select
-#define ml_getaddrinfo  getaddrinfo
 #define ml_freeaddrinfo freeaddrinfo
 #define ml_write_sock   write
 #define ml_read_sock    read
+
+/* Instrumented like the cellular variant — a "begin" with no "end" is a
+ * query still registered in the lwip DNS table
+ * (see notes/BUG_TS_DNS_FOUND_CRASH.md). */
+static inline int ml_getaddrinfo(const char *host, const char *svc,
+                                   const struct addrinfo *hints,
+                                   struct addrinfo **res) {
+    ESP_LOGD("ml_dns", "getaddrinfo(%s) begin [%s]", host, pcTaskGetName(NULL));
+    int rc = getaddrinfo(host, svc, hints, res);
+    ESP_LOGD("ml_dns", "getaddrinfo(%s) end rc=%d [%s]", host, rc, pcTaskGetName(NULL));
+    return rc;
+}
 #endif /* CONFIG_ML_ENABLE_CELLULAR */
 
 /* PSRAM allocation helper */
