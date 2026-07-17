@@ -233,6 +233,14 @@
  * you can change to 2K ~ 16K and must be larger than TCP RX windows size in order to avoid being overflow.
  */
 #ifndef CONFIG_USBHOST_RTL8152_ETH_MAX_RX_SIZE
+/* RTL8152 class DISABLED (meatpi 2026-07-13) - bench findings if it is
+ * ever re-enabled: 2048 REJECTS real adapters at connect ("rx_buf_sz
+ * is overflow" - the r815x init wants a 16 KB RX aggregation buffer),
+ * and EXACTLY 16 KB CORRUPTS THE HEAP (the rx thread accumulates a
+ * further 16 KB chunk at &buffer[rx_length]; garbage rx_desc walks, RX
+ * collapses to ~0.1 Mbit/s). It must be 32 KB - a 32 KB internal-DMA
+ * heap pool while connected, which is the cost the class was disabled
+ * over. ASIX is the supported USB-Ethernet adapter. */
 #define CONFIG_USBHOST_RTL8152_ETH_MAX_RX_SIZE (2048)
 #endif
 /* Because lwip do not support multi pbuf at a time, so increasing this variable has no performance improvement */

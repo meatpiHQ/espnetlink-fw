@@ -1127,15 +1127,15 @@ int usbh_kill_urb(struct usbh_urb *urb)
 
     flags = usb_osal_enter_critical_section();
 
-    /* Re-read hcpriv under the lock: the channel IRQ handler (which now
-     * also holds this lock) may have completed the URB and freed the
-     * channel while we raced for it — the pre-lock NULL check above is
-     * not enough (see notes/BUG_DWC2_CHAN_IRQ_CRASH.md). */
-    chan = (struct dwc2_chan *)urb->hcpriv;
-    if (chan == NULL) {
+    /* Re-check under the lock: the channel ISR (other core) may have
+     * completed and freed this urb between the entry check and here
+     * (TOCTOU - BUG_DWC2_CHAN_IRQ_CRASH.md; matches espnetlink's fix) */
+    if (urb->hcpriv == NULL) {
         usb_osal_leave_critical_section(flags);
         return -USB_ERR_INVAL;
     }
+
+    chan = (struct dwc2_chan *)urb->hcpriv;
 
     dwc2_halt(bus, chan->chidx);
 
@@ -1162,9 +1162,8 @@ static inline void dwc2_urb_waitup(struct usbh_urb *urb)
 
     chan = (struct dwc2_chan *)urb->hcpriv;
     if (chan == NULL) {
-        /* Already killed/completed — usbh_kill_urb() ran its completion;
-         * nothing left to wake up (defense in depth, the IRQ handlers
-         * bail before reaching here since the teardown-race fix). */
+        /* urb already reaped by usbh_kill_urb racing this completion
+         * (EXCVADDR 0x8 crash - BUG_DWC2_CHAN_IRQ_CRASH.md) */
         return;
     }
 
@@ -1188,16 +1187,6 @@ static void dwc2_inchan_irq_handler(struct usbh_bus *bus, uint8_t ch_num)
     uint32_t chan_intstatus;
     struct dwc2_chan *chan;
     struct usbh_urb *urb;
-    size_t flags;
-
-    /* Hold the osal critical section (cross-core spinlock on the IDF port,
-     * recursive on the same core) for the whole handler: usbh_kill_urb()
-     * can run concurrently on the other core and free the channel/URB
-     * under us mid-handler (LoadProhibited in dwc2_chan_free via
-     * dwc2_urb_waitup — see notes/BUG_DWC2_CHAN_IRQ_CRASH.md). Take the
-     * lock BEFORE sampling HCINT so a completed kill leaves us reading
-     * the post-halt (cleared) status, never a stale one. */
-    flags = usb_osal_enter_critical_section();
 
     chan_intstatus = USB_OTG_HC(ch_num)->HCINT;
 
@@ -1205,12 +1194,11 @@ static void dwc2_inchan_irq_handler(struct usbh_bus *bus, uint8_t ch_num)
     urb = chan->urb;
     //printf("s1:%08x\r\n", chan_intstatus);
 
+    /* usbh_kill_urb (task context, possibly the other core) may have
+     * halted the channel and freed chan/urb while this interrupt was
+     * already latched or executing - BUG_DWC2_CHAN_IRQ_CRASH.md */
     if (urb == NULL || !chan->inuse) {
-        /* URB was killed while this channel interrupt was in flight;
-         * dwc2_halt() already cleared HCINT — drop any residual status
-         * instead of touching freed state. */
         USB_OTG_HC(ch_num)->HCINT = chan_intstatus;
-        usb_osal_leave_critical_section(flags);
         return;
     }
 
@@ -1317,8 +1305,6 @@ static void dwc2_inchan_irq_handler(struct usbh_bus *bus, uint8_t ch_num)
             dwc2_urb_waitup(urb);
         }
     }
-
-    usb_osal_leave_critical_section(flags);
 }
 
 static void dwc2_outchan_irq_handler(struct usbh_bus *bus, uint8_t ch_num)
@@ -1326,11 +1312,6 @@ static void dwc2_outchan_irq_handler(struct usbh_bus *bus, uint8_t ch_num)
     uint32_t chan_intstatus;
     struct dwc2_chan *chan;
     struct usbh_urb *urb;
-    size_t flags;
-
-    /* Same teardown-race guard as dwc2_inchan_irq_handler — see
-     * notes/BUG_DWC2_CHAN_IRQ_CRASH.md. */
-    flags = usb_osal_enter_critical_section();
 
     chan_intstatus = USB_OTG_HC(ch_num)->HCINT;
 
@@ -1338,10 +1319,11 @@ static void dwc2_outchan_irq_handler(struct usbh_bus *bus, uint8_t ch_num)
     urb = chan->urb;
     //printf("s2:%08x\r\n", chan_intstatus);
 
+    /* usbh_kill_urb (task context, possibly the other core) may have
+     * halted the channel and freed chan/urb while this interrupt was
+     * already latched or executing - BUG_DWC2_CHAN_IRQ_CRASH.md */
     if (urb == NULL || !chan->inuse) {
-        /* URB was killed while this channel interrupt was in flight. */
         USB_OTG_HC(ch_num)->HCINT = chan_intstatus;
-        usb_osal_leave_critical_section(flags);
         return;
     }
 
@@ -1468,8 +1450,6 @@ static void dwc2_outchan_irq_handler(struct usbh_bus *bus, uint8_t ch_num)
             dwc2_urb_waitup(urb);
         }
     }
-
-    usb_osal_leave_critical_section(flags);
 }
 
 static void dwc2_port_irq_handler(struct usbh_bus *bus)
@@ -1561,11 +1541,16 @@ void USBH_IRQHandler(uint8_t busid)
             chan_int = (USB_OTG_HOST->HAINT & USB_OTG_HOST->HAINTMSK) & 0xFFFFU;
             for (uint8_t i = 0U; i < g_dwc2_hcd[bus->hcd.hcd_id].hw_params.host_channels; i++) {
                 if ((chan_int & (1UL << (i & 0xFU))) != 0U) {
+                    /* Same spinlock usbh_kill_urb holds (SAFE variant is
+                     * ISR-capable): without it a kill on the other core can
+                     * free chan/urb mid-handler - BUG_DWC2_CHAN_IRQ_CRASH.md */
+                    size_t chan_flags = usb_osal_enter_critical_section();
                     if ((USB_OTG_HC(i)->HCCHAR & USB_OTG_HCCHAR_EPDIR) == USB_OTG_HCCHAR_EPDIR) {
                         dwc2_inchan_irq_handler(bus, i);
                     } else {
                         dwc2_outchan_irq_handler(bus, i);
                     }
+                    usb_osal_leave_critical_section(chan_flags);
                 }
             }
             USB_OTG_GLB->GINTSTS = USB_OTG_GINTSTS_HCINT;
