@@ -109,7 +109,22 @@ void vpn_ts_status(char *ip, size_t ip_len, int *peers)
         microlink_ip_to_str(vpn_ip, ip);
     }
 
-    *peers = microlink_get_peer_count(s_ml);
+    /* peer_count is a slot bound and may contain pruned holes (removal
+     * only tail-compacts) — count the slots that still answer. */
+    int slots = microlink_get_peer_count(s_ml);
+    int live  = 0;
+
+    for (int i = 0; i < slots; i++)
+    {
+        microlink_peer_info_t info;
+
+        if (microlink_get_peer_info(s_ml, i, &info) == ESP_OK)
+        {
+            live++;
+        }
+    }
+
+    *peers = live;
 }
 
 int vpn_ts_get_peers(vpn_ts_peer_t *out, int max)

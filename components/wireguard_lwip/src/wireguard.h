@@ -185,6 +185,10 @@ struct wireguard_peer {
 struct wireguard_device {
 	// Maybe have a "Device private" member to abstract these?
 	struct netif *netif;
+	// Netif the encrypted OUTER packets are sent through (normal socket
+	// mode only). Outer UDP must never be routed, or it loops back into
+	// this netif whenever WireGuard holds the default route.
+	struct netif *underlying_netif;
 	struct udp_pcb *udp_pcb;
 
 	uint8_t public_key[WIREGUARD_PUBLIC_KEY_LEN];

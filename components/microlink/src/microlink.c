@@ -683,6 +683,11 @@ esp_err_t microlink_get_peer_info(const microlink_t *ml, int index, microlink_pe
         return ESP_ERR_INVALID_ARG;
     }
     const ml_peer_t *p = &ml->peers[index];
+    if (!p->active) {
+        /* Pruned slot inside peer_count (removal only tail-compacts):
+         * reporting it resurrects ghost peers in /api/vpn */
+        return ESP_ERR_NOT_FOUND;
+    }
     info->vpn_ip = p->vpn_ip;
     strncpy(info->hostname, p->hostname, sizeof(info->hostname) - 1);
     memcpy(info->public_key, p->public_key, 32);

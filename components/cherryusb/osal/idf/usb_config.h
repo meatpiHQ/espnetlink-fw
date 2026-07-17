@@ -15,9 +15,11 @@
 #define CONFIG_USB_PRINTF(...) esp_rom_printf(__VA_ARGS__)
 
 #ifndef CONFIG_USB_DBG_LEVEL
-/* WiCAN DEBUG (temporary): verbose while bringing up the first adapter
- * on IDF v6 — restore USB_DBG_INFO after the eth bench passes */
-#define CONFIG_USB_DBG_LEVEL USB_DBG_LOG
+/* USB_DBG_INFO: the temporary bring-up USB_DBG_LOG level printed per
+ * packet (esp_rom_printf, synchronous) in the RNDIS/NCM data path -
+ * that UART time inside USB work loops widened the kill-urb-vs-ISR
+ * race (BUG_DWC2_CHAN_IRQ_CRASH.md) and throttled throughput. */
+#define CONFIG_USB_DBG_LEVEL USB_DBG_INFO
 #endif
 
 /* Enable print with color */

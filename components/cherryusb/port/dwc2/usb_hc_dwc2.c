@@ -1205,7 +1205,7 @@ static void dwc2_inchan_irq_handler(struct usbh_bus *bus, uint8_t ch_num)
     urb = chan->urb;
     //printf("s1:%08x\r\n", chan_intstatus);
 
-    if (urb == NULL) {
+    if (urb == NULL || !chan->inuse) {
         /* URB was killed while this channel interrupt was in flight;
          * dwc2_halt() already cleared HCINT — drop any residual status
          * instead of touching freed state. */
@@ -1338,7 +1338,7 @@ static void dwc2_outchan_irq_handler(struct usbh_bus *bus, uint8_t ch_num)
     urb = chan->urb;
     //printf("s2:%08x\r\n", chan_intstatus);
 
-    if (urb == NULL) {
+    if (urb == NULL || !chan->inuse) {
         /* URB was killed while this channel interrupt was in flight. */
         USB_OTG_HC(ch_num)->HCINT = chan_intstatus;
         usb_osal_leave_critical_section(flags);

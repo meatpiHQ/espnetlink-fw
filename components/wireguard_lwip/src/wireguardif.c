@@ -125,6 +125,48 @@ static bool wireguardif_can_send_initiation(struct wireguard_peer *peer) {
 	return ((peer->last_initiation_tx == 0) || (wireguard_expired(peer->last_initiation_tx, REKEY_TIMEOUT)));
 }
 
+// Outer (encrypted) UDP must be pinned to a real uplink netif. Letting
+// udp_sendto() route it picks the WireGuard netif itself as soon as WG
+// holds the default route: output -> encrypt -> route -> output ... and
+// the tcpip task stack overflows. (Mechanism ported from the legacy
+// esp_wireguard wireguardif; it was lost in this rewrite.)
+static struct netif *wireguardif_get_ready_underlying_netif(struct wireguard_device *device) {
+	struct netif *n;
+	struct netif *pinned = NULL;
+	struct netif *fallback = NULL;
+
+	// Validate the pinned pointer against the live netif list before
+	// dereferencing it - netifs can be removed at runtime.
+	for (n = netif_list; n != NULL; n = n->next) {
+		if (n == device->underlying_netif) {
+			pinned = n;
+			break;
+		}
+	}
+	if (pinned && netif_is_up(pinned) && netif_is_link_up(pinned) &&
+	    !ip_addr_isany_val(pinned->ip_addr)) {
+		return pinned;
+	}
+
+	// Pinned uplink gone or down (e.g. WiFi->LTE failover): pick another
+	// ready non-WG netif, preferring one with a gateway.
+	for (n = netif_list; n != NULL; n = n->next) {
+		if (n == device->netif) {
+			continue;
+		}
+		if (!netif_is_up(n) || !netif_is_link_up(n) || ip_addr_isany_val(n->ip_addr)) {
+			continue;
+		}
+		if (!ip4_addr_isany_val(*netif_ip4_gw(n))) {
+			return n;
+		}
+		if (fallback == NULL) {
+			fallback = n;
+		}
+	}
+	return fallback;
+}
+
 static err_t wireguardif_peer_output(struct netif *netif, struct pbuf *q, struct wireguard_peer *peer) {
 	struct wireguard_device *device = (struct wireguard_device *)netif->state;
 
@@ -187,7 +229,11 @@ static err_t wireguardif_peer_output(struct netif *netif, struct pbuf *q, struct
 
 	// Send to last known port, not the connect port
 	//TODO: Support DSCP and ECN - lwip requires this set on PCB globally, not per packet
-	return udp_sendto(device->udp_pcb, q, &peer->ip, peer->port);
+	struct netif *underlying = wireguardif_get_ready_underlying_netif(device);
+	if (underlying == NULL) {
+		return ERR_IF;
+	}
+	return udp_sendto_if(device->udp_pcb, q, &peer->ip, peer->port, underlying);
 }
 
 static err_t wireguardif_device_output(struct wireguard_device *device, struct pbuf *q, const ip_addr_t *ipaddr, u16_t port) {
@@ -203,7 +249,11 @@ static err_t wireguardif_device_output(struct wireguard_device *device, struct p
 		}
 		return ERR_MEM;
 	}
-	return udp_sendto(device->udp_pcb, q, ipaddr, port);
+	struct netif *underlying = wireguardif_get_ready_underlying_netif(device);
+	if (underlying == NULL) {
+		return ERR_IF;
+	}
+	return udp_sendto_if(device->udp_pcb, q, ipaddr, port, underlying);
 }
 
 static err_t wireguardif_output_to_peer(struct netif *netif, struct pbuf *q, const ip4_addr_t *ipaddr, struct wireguard_peer *peer) {
@@ -1289,6 +1339,12 @@ err_t wireguardif_init(struct netif *netif) {
 						device = (struct wireguard_device *)mem_calloc(1, sizeof(struct wireguard_device));
 						if (device) {
 							device->netif = netif;
+							// Pin the uplink for outer packets NOW, while the
+							// system default is still the real uplink (the WG
+							// netif only becomes default after connect).
+							device->underlying_netif = init_data->bind_netif
+									? init_data->bind_netif
+									: ((netif_default != netif) ? netif_default : NULL);
 							if (init_data->bind_netif) {
 								udp_bind_netif(udp, init_data->bind_netif);
 							}
