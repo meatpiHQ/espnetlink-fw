@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "imu_manager.c"
+    SRCS "imu_manager_events.c" "imu_manager.c"
          "imu_manager_policy.c"
          "imu_manager_settings.c"
          "imu_manager_migrate.c"
