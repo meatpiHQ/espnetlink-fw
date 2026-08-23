@@ -55,10 +55,18 @@ static void usbnet_dns_proxy_task(void *arg)
                 continue;
             }
 
+            /* Own address only (not INADDR_ANY) + SO_REUSEADDR: the WiFi AP
+             * runs its own UDP/53 proxy on 192.168.80.1 (wifi_modem); lwIP
+             * delivers each query to the pcb bound to the matching address. */
+            int reuse = 1;
+
+            (void)lwip_setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse,
+                                  sizeof(reuse));
+
             struct sockaddr_in bind_addr = { 0 };
             bind_addr.sin_family = AF_INET;
             bind_addr.sin_port = lwip_htons(USBNET_DNS_PORT);
-            bind_addr.sin_addr.s_addr = lwip_htonl(INADDR_ANY);
+            bind_addr.sin_addr.s_addr = st->ipaddr.addr;
 
             if (lwip_bind(sock, (struct sockaddr *)&bind_addr, sizeof(bind_addr)) != 0)
             {

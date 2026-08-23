@@ -1,0 +1,6 @@
+## wifi_modem: settings descriptor + health route use cJSON.
+## IDF v6 dropped the bundled `json` component; cJSON comes from the registry.
+dependencies:
+  espressif/cjson:
+    version: "^1.7.18"
+    require: private

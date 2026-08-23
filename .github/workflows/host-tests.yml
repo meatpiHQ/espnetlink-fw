@@ -35,6 +35,7 @@ jobs:
           - components/vpn_manager/host_test
           - components/filesystem/host_test
           - components/cert_manager/host_test
+          - components/wifi_modem/host_test
     steps:
       - uses: actions/checkout@v4
       - name: Build and run ${{ matrix.suite }}

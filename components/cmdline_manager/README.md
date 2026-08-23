@@ -39,6 +39,7 @@ byte-alike — outputs + `OK`/`ERROR` trailers on the `esp> ` console):
 | `agnss -s/-v/-e/-d/-i/-x` | gps (agnss_console.c, same `cli` gate) |
 | `lte -s/-r/-n/-p/-o/-i/-q/-j` | lte_upstream_pppos (registered on its settings apply, `cli` gate) |
 | `imu` | imu (registered on the `imu` {cli} settings apply) |
+| `wifi_modem [-k] [-u auto\|ncm\|power_only] [-a 0\|1] [-d 0\|1]` | wifi_modem (`wifi_modem_cli.c`, registered on its settings apply, `cli` gate; `-k` prints the per-device AP password — console surfaces only) |
 | `echo 0\|1` | usb_cli_console (`usb_cli_console_cli.c` — device-side echo is this transport's own knob) |
 | `ota <size> [sha256]` | usb_cli_console (`usb_cli_ota.c` — firmware update over this console) |
 | `config list/get/set/reset` | **main/main_cli.c** — legacy-parity view over the settings_manager descriptors |

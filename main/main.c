@@ -15,6 +15,7 @@
 #include "hw_config.h"
 #include "filesystem.h"
 #include "gps.h"
+#include "wifi_modem.h"
 #include "cert_manager.h"
 #include "i2c_bus.h"
 #include "imu_manager.h"
@@ -30,6 +31,7 @@
 #include "esp_event.h"
 #include "esp_heap_caps.h"
 #include "esp_netif.h"
+#include "hal/usb_serial_jtag_ll.h"
 
 #include "cJSON.h"
 
@@ -275,6 +277,15 @@ void app_main(void)
 
     cJSON_InitHooks((cJSON_Hooks *)&CJSON_PSRAM);
 
+    /* Detach the USB-Serial-JTAG from the USB pads NOW. Until the OTG device
+     * stack takes the PHY (~3.4 s into boot) a PC on the USB-C port
+     * enumerates the serial-JTAG (303A:1001) and its CDC driver's DTR/RTS
+     * toggles reset the chip (rst:0x15 USB_UART_CHIP_RESET) — a software
+     * reboot with a PC attached looped forever (bench 2026-08-23). Nothing
+     * here uses the serial-JTAG (console secondary = none); ROM download
+     * mode is unaffected (the app isn't running then). */
+    usb_serial_jtag_ll_phy_enable_pad(false);
+
     // Log reset and wakeup reason at boot time, before any long startup delays.
     // IDF v6: esp_sleep_get_wakeup_causes() returns a BIT(cause) bitmap
     // (the singular esp_sleep_get_wakeup_cause() is deprecated).
@@ -422,6 +433,8 @@ void app_main(void)
     init_step("lte_upstream_pppos_register_settings",
               lte_upstream_pppos_register_settings);
     init_step("gps_register_settings", gps_register_settings);
+    /* WiFi-modem mode (usb_mode/ap_share/AP password provisioning) */
+    init_step("wifi_modem_init", wifi_modem_init);
     init_step("usb_cli_console_register_settings",
               usb_cli_console_register_settings);
     init_step("main_register_settings", main_register_settings);
@@ -431,6 +444,7 @@ void app_main(void)
     init_step("ha_webhooks_register_http", ha_webhooks_register_http);
     init_step("lte_register_http", lte_upstream_pppos_register_http);
     init_step("gps_register_http", gps_register_http);
+    init_step("wifi_modem_register_http", wifi_modem_register_http);
     init_step("imu_manager_register_http", imu_manager_register_http);
     init_step("vpn_manager_register_http", vpn_manager_register_http);
     init_step("cert_manager_register_http", cert_manager_register_http);
@@ -544,6 +558,32 @@ void app_main(void)
      * anything, so field devices keep their configuration) */
     main_legacy_import_run();
 
+    /* One-time per-device AP password provisioning (the AP is the product's
+     * main interface in WiFi-modem mode; the stock "12345678" never ships).
+     * Persist-only like every setting — reboot once so wifi_manager applies
+     * it, the way the legacy import does. */
+    bool provision_reboot = false;
+    esp_err_t prov_err = wifi_modem_provision(&provision_reboot);
+
+    if (prov_err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "wifi_modem_provision failed: %s (continuing degraded)",
+                 esp_err_to_name(prov_err));
+    }
+    else if (provision_reboot)
+    {
+        ESP_LOGW(TAG, "per-device AP password provisioned - rebooting once "
+                      "to apply");
+        vTaskDelay(pdMS_TO_TICKS(250));
+        restart_tracker_restart(RESTART_TRACKER_PLANNED_REASON_CONFIG_APPLY,
+                                RESTART_TRACKER_SOURCE_UNKNOWN, 0);
+    }
+
+    /* WiFi-modem mode: usb_mode=power_only cuts the USB data lines at the
+     * mux right here, before any USB device stack could enumerate (the
+     * WiCAN host's USB transmitter desenses the GNSS). */
+    init_step("wifi_modem_apply_usb_route", wifi_modem_apply_usb_route);
+
     // GPS after the settings apply: its config is the "gps" descriptor
     esp_err_t gps_err = gps_init(gps_settings()->agnss_enabled);
     if (gps_err != ESP_OK)
@@ -558,6 +598,7 @@ void app_main(void)
     start_component("i2c_bus", i2c_bus_start);
     start_component("imu_manager", imu_manager_start);
     start_component("wifi_manager", wifi_manager_start);
+    start_component("wifi_modem", wifi_modem_start);
     start_component("http_server_manager", http_server_manager_start);
     start_component("http_client_manager", http_client_manager_start);
     start_component("mdns_manager", mdns_manager_start);
@@ -565,8 +606,23 @@ void app_main(void)
     start_component("ha_webhooks", ha_webhooks_start);
     start_component("cmdline_manager", cmdline_manager_start);
 
-    usb_dev_ethernet_set_console_enabled(true);
-    start_component("usb_dev_ethernet", usb_dev_ethernet_start);
+    /* USB device stack only when the data lines are routed to us. The USB
+     * link offers itself as the host's default router ONLY when the LTE
+     * uplink is shared over it (ncm_share) — otherwise it is a control
+     * channel and the host's own internet path stays untouched. */
+    if (wifi_modem_usb_data_enabled())
+    {
+        usb_dev_ethernet_set_console_enabled(true);
+        usb_dev_ethernet_set_router_offer(
+            lte_upstream_pppos_settings_is_configured() &&
+            lte_upstream_pppos_settings()->ncm_share);
+        start_component("usb_dev_ethernet", usb_dev_ethernet_start);
+    }
+    else
+    {
+        ESP_LOGW(TAG, "usb_dev_ethernet NOT started (wifi_modem usb_mode="
+                      "power_only)");
+    }
 
 #if USB_DEV_ETHERNET_MODE && ENABLE_LTE_UPSTREAM_PPPOS
     /* Pinned to core 1: uart_driver_install allocates its interrupt on the

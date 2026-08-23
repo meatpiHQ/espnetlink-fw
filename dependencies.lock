@@ -60,7 +60,7 @@ dependencies:
       type: service
     version: 1.11.3
   espressif/tinyusb:
-    component_hash: a40b7f67df6ac254a4afd96c6401cc56f2059ae747d6d7e66b568bca53ad0edc
+    component_hash: a72b7d67472914ab76309340fd50d578b31e310963d45ad0f81144bde3314752
     dependencies:
     - name: idf
       require: private
@@ -74,13 +74,13 @@ dependencies:
     - esp32p4
     - esp32h4
     - esp32s31
-    version: 0.19.0~3
+    version: 0.21.0~1
   espressif/usb:
-    component_hash: 1d90d7c7b0682dbfcc36f47cf5acf224a5cfb850a62f39cd86d3159cfec12a81
+    component_hash: 6c2cff118141dbbca181d0d27d71801fdddfc78f7ac03ae43f6e5a8cbd89cb99
     dependencies:
     - name: idf
       require: private
-      version: '>=5.4'
+      version: '>=5.5.3'
     source:
       registry_url: https://components.espressif.com
       type: service
@@ -91,7 +91,7 @@ dependencies:
     - esp32p4
     - esp32h4
     - linux
-    version: 1.4.1
+    version: 1.5.0
   espressif/usb_host_cdc_acm:
     component_hash: f3893a5e117c65f3c4d90d282bbb43624a2fec4144532e5c72223e69bd1b00e9
     dependencies:
@@ -204,6 +204,6 @@ direct_dependencies:
 - idf
 - igrr/libnmea
 - joltwallet/littlefs
-manifest_hash: 8a9573e4d1466345bf603ec0e5c4c21c5a14609994922ccbb32cd237c4829d4d
+manifest_hash: 90785da59fbf987ecd25c3118a20dd3d54ccab5acd77ceb3b4e38d2516c72f53
 target: esp32s3
 version: 3.0.0

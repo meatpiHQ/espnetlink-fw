@@ -36,6 +36,9 @@ typedef struct
      * usbnet_lwip_start_in_tcpip() applies it as soon as the interface is up. */
     bool     pending_share;
     ip4_addr_t pending_dns;
+    /* DHCP option 3 (router) offered to the host? false = control channel
+     * only (usb_dev_ethernet_set_router_offer). */
+    bool     offer_router;
 } usbnet_state_t;
 
 usbnet_state_t *usbnet_state(void);

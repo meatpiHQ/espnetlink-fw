@@ -552,7 +552,15 @@ void usbnet_usb_start(void)
         usb_cli_console_usb_add(0);
     }
 
-    usbnet_dns_proxy_start();
+    /* Control-channel mode (no sharing): leave UDP/53 on 192.168.7.1 CLOSED.
+     * The IDF DHCP server always offers our address as DNS (option 6 even
+     * with the DNS offer disabled), and a proxy with no upstream made the
+     * host's resolver wait on it; a closed port answers ICMP port-unreachable
+     * so the host moves on to its own resolvers at once. */
+    if (st->offer_router)
+    {
+        usbnet_dns_proxy_start();
+    }
 
     uintptr_t reg_base = (uintptr_t)ESP_USBD_BASE;
     int usb_ret = usbd_initialize(0, reg_base, usbnet_usbd_event_handler);

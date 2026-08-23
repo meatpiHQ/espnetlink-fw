@@ -47,7 +47,7 @@ Descriptor `"lte_upstream_pppos"`, version 1 (`lte_upstream_pppos_settings.c`):
 | `apn_user` | str ≤32 | `""` | APN username |
 | `apn_password` | str ≤32 | `""` | APN password |
 | `apn_pin` | str ≤8 | `""` | SIM PIN (empty = no PIN lock) |
-| `ncm_share` | bool | `true` | share the uplink over USB RNDIS (NAT + DNS) |
+| `ncm_share` | bool | `false` | share the uplink over USB NCM (NAT + DNS + default-router offer). Off since the WiFi-modem mode: USB is a control/pairing channel, internet comes over the AP; on, a PC's default route moves onto the LTE link |
 | `cli` | bool | `true` | register the `lte` console command (§6b) |
 
 ## Memory footprint (estimated)

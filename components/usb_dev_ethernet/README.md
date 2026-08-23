@@ -17,7 +17,7 @@
 
 ## Settings
 
-None (no persisted settings — sharing is driven by `lte_upstream_pppos`'s `ncm_share` setting; console enable is wired by `main`).
+None (no persisted settings — sharing is driven by `lte_upstream_pppos`'s `ncm_share` setting; console enable and the DHCP router/DNS offer (`usb_dev_ethernet_set_router_offer()`, on only when sharing) are wired by `main`). The USB link is a control channel unless shared: the host's lease carries address + netmask only.
 
 ## Memory footprint (estimated)
 

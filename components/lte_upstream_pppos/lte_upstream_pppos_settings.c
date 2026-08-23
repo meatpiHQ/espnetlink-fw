@@ -5,9 +5,10 @@
  *
  * Field names mirror the legacy config_manager keys (APN, LTE_ENABLED, ...);
  * main's one-time legacy import maps the old /storage/config.json values
- * onto this descriptor. `ncm_share` keeps the legacy product default (true:
- * sharing the LTE uplink over USB is the device's purpose); the bench
- * device carries an imported false while under test.
+ * onto this descriptor. `ncm_share` defaults to FALSE since the WiFi-modem
+ * mode (2026-08-23): the USB link is a control/pairing channel and internet
+ * is served over the AP; sharing the slow LTE uplink over USB silently
+ * moved a PC's default route onto it. Opt back in per device.
  */
 #include <stdio.h>
 
@@ -25,7 +26,7 @@ static const settings_field_t FIELDS[] =
     SETTINGS_STR ("apn_user",     32, ""),       /* legacy APN_USER    */
     SETTINGS_STR ("apn_password", 32, ""),       /* legacy APN_PASS    */
     SETTINGS_STR ("apn_pin",       8, ""),       /* legacy APN_PIN     */
-    SETTINGS_BOOL("ncm_share", true),            /* legacy NCM_SHARE   */
+    SETTINGS_BOOL("ncm_share", false),           /* legacy NCM_SHARE   */
     SETTINGS_BOOL("cli",       true),
 };
 
@@ -66,7 +67,7 @@ static bool get_bool(const cJSON *obj, const char *key, bool fallback)
 static esp_err_t on_apply(const cJSON *settings)
 {
     s_cfg.enabled   = get_bool(settings, "enabled", true);
-    s_cfg.ncm_share = get_bool(settings, "ncm_share", true);
+    s_cfg.ncm_share = get_bool(settings, "ncm_share", false);
     s_cfg.cli       = get_bool(settings, "cli", true);
     copy_str(s_cfg.apn, sizeof(s_cfg.apn), settings, "apn");
     copy_str(s_cfg.apn_user, sizeof(s_cfg.apn_user), settings, "apn_user");

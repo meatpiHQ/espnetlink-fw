@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "vpn_manager_events.c" "vpn_manager.c"
+    SRCS "vpn_manager.c"
          "vpn_manager_settings.c"
          "vpn_manager_wg.c"
          "vpn_manager_ts.c"

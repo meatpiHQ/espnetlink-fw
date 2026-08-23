@@ -124,6 +124,25 @@ void usbnet_lwip_start_in_tcpip(void *arg)
     {
         netif_set_up(&st->usbnetif);
         netif_set_link_up(&st->usbnetif);
+
+        /* Re-plug / bus reset: the stop path stopped the DHCP server, so a
+         * host that re-enumerates would never get a lease (Windows fell to
+         * 169.254.x after the wifi_modem runtime restore, bench 2026-08-23).
+         * Restart it with the same address/options. */
+        if (st->dhcps != NULL)
+        {
+            err_t dh_err = dhcps_start(st->dhcps, &st->usbnetif, st->ipaddr);
+
+            if (dh_err != ERR_OK)
+            {
+                ESP_LOGE(TAG, "DHCP server restart failed: err=%d", (int)dh_err);
+            }
+            else
+            {
+                ESP_LOGI(TAG, "DHCP server restarted (usbnet netif re-up)");
+            }
+        }
+
         st->lwip_ready = true;
         return;
     }
@@ -164,9 +183,21 @@ void usbnet_lwip_start_in_tcpip(void *arg)
         ip_addr_copy_from_ip4(dns, st->ipaddr);
         dhcps_dns_setserver(st->dhcps, &dns);
 
-        dhcps_offer_t offer_dns = OFFER_DNS;
+        /* Options 3 (router) and 6 (DNS) only when the uplink is shared over
+         * USB. The IDF server's default mask offers the router always, which
+         * moved a PC's default route onto the LTE link even with NAT off;
+         * and offering ourselves as DNS without sharing makes the host wait
+         * on a proxy that has no upstream. Control-channel mode = address
+         * only: the host keeps its own gateway and resolvers. */
+        dhcps_offer_t offer_dns = st->offer_router ? OFFER_DNS : 0;
+
         dhcps_set_option_info(st->dhcps, DOMAIN_NAME_SERVER, &offer_dns,
                               sizeof(offer_dns));
+
+        dhcps_offer_t offer_router = st->offer_router ? OFFER_ROUTER : 0;
+
+        dhcps_set_option_info(st->dhcps, ROUTER_SOLICITATION_ADDRESS,
+                              &offer_router, sizeof(offer_router));
 
         dhcps_set_new_lease_cb(st->dhcps, usbnet_dhcps_lease_cb, NULL);
 
@@ -177,7 +208,9 @@ void usbnet_lwip_start_in_tcpip(void *arg)
         }
         else
         {
-            ESP_LOGI(TAG, "DHCP server started on UDP/67 (usbnet netif)");
+            ESP_LOGI(TAG, "DHCP server started on UDP/67 (usbnet netif, "
+                          "router+DNS %s)",
+                     st->offer_router ? "offered" : "not offered");
         }
     }
 

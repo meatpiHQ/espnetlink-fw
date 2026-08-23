@@ -59,6 +59,9 @@ exist as far as the product is concerned.
 | `/api/wifi/scan` | GET | wifi_manager |
 | `/api/lte` | GET | lte_upstream_pppos — uplink status (web UI status page) |
 | `/api/gps` | GET | gps — fix snapshot (web UI status page) |
+| `/api/wifi_modem` | GET | wifi_modem (wifi_modem/README.md) — WiFi-modem health document for the WiCAN poller: usb_mode, usb_data, NAPT, AP, LTE + GPS summary (no secrets) |
+| `/api/wifi_modem/credentials` | GET | wifi_modem — AP `{ssid,password,device_id}`; **403 unless the request arrived over a non-WiFi interface (USB)** — the WiCAN pairing channel |
+| `/api/wifi_modem/usb_data` | POST | wifi_modem — `{"enabled":bool}` runtime USB data cut/restore at the mux (applied 500 ms after the answer); 409 when `usb_mode=ncm` |
 | `/api/vpn`, `/api/vpn/keygen` | GET / POST | vpn_manager |
 | `/api/imu` | GET | imu_manager |
 | `/` + UI assets | GET | web_ui (gzip asset table) |
@@ -67,7 +70,7 @@ Registered settings components (each answers under `/api/settings/<name>`):
 `log_manager`, `dev_status_manager`, `wifi_manager`, `cmdline_manager`,
 `lte_upstream_pppos`, `gps`, `system`, `usb_cli_console`,
 `restart_tracker`, `ha_webhooks`, `mdns_manager`, `vpn_manager`,
-`imu_manager`, `filesystem`.
+`imu_manager`, `filesystem`, `wifi_modem`.
 
 ## Home Assistant device contract (components/device-contract/)
 

@@ -77,3 +77,8 @@ CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
 CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
 CONFIG_ESP_COREDUMP_STACK_SIZE=1792
+# wifi_modem: NAPT the WiFi AP netif into the LTE uplink (AP sharing).
+# NAPT depends on IP forwarding - without IP_FORWARD Kconfig silently drops NAPT
+# (caught by wifi_modem/test_apps on a fresh config).
+CONFIG_LWIP_IP_FORWARD=y
+CONFIG_LWIP_IPV4_NAPT=y

@@ -1,0 +1,3 @@
+## IDF v6 dropped the bundled `json` component; cJSON comes from the registry.
+dependencies:
+  espressif/cjson: "^1.7.18"

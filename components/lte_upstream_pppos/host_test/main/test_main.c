@@ -3,7 +3,7 @@
  * @brief Host tests for the "lte_upstream_pppos" settings descriptor
  *        (lte_upstream_pppos_settings.c) against the real settings_manager
  *        registry with the in-memory storage stub — schema defaults
- *        (including the ncm_share=true PRODUCT default), string length
+ *        (including the ncm_share=false PRODUCT default), string length
  *        limits, reboot-to-apply semantics, and the §6b `cli` gate.
  */
 #include <stdlib.h>
@@ -79,11 +79,11 @@ static esp_err_t persist_bool(const char *field, bool val)
     return err;
 }
 
-/* Fresh device: schema defaults persist and apply. ncm_share defaults TRUE —
- * that's the PRODUCT default (sharing the LTE uplink over USB is the
- * device's purpose); the bench override lives in imported settings, not in
- * the schema. If this assertion ever fails, someone changed the product
- * behavior, not a test detail. */
+/* Fresh device: schema defaults persist and apply. ncm_share defaults FALSE
+ * since the WiFi-modem mode (2026-08-23): the USB link is a control/pairing
+ * channel, internet is served over the AP, and sharing the slow LTE uplink
+ * over USB silently moved a PC's default route onto it. If this assertion
+ * ever fails, someone changed the product behavior, not a test detail. */
 void test_defaults_applied_and_cli_registered(void)
 {
     fixture_reset();
@@ -98,7 +98,7 @@ void test_defaults_applied_and_cli_registered(void)
     TEST_ASSERT_EQUAL_STRING("", cfg->apn_user);
     TEST_ASSERT_EQUAL_STRING("", cfg->apn_password);
     TEST_ASSERT_EQUAL_STRING("", cfg->apn_pin);
-    TEST_ASSERT_TRUE(cfg->ncm_share);
+    TEST_ASSERT_FALSE(cfg->ncm_share);
     TEST_ASSERT_TRUE(cfg->cli);
     TEST_ASSERT_EQUAL(1, s_cli_registrations);
 }

@@ -23,6 +23,11 @@ void usb_dev_ethernet_set_console_enabled(bool enabled)
     usbnet_usb_set_console_enabled(enabled);
 }
 
+void usb_dev_ethernet_set_router_offer(bool enabled)
+{
+    usbnet_state()->offer_router = enabled;
+}
+
 typedef struct
 {
     uint32_t dns_ipv4_addr;

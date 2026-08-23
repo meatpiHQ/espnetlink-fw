@@ -1,0 +1,9 @@
+# Standard §7: test apps build against the MAIN firmware's config — the
+# repo-root sdkconfig.defaults is inherited first (see CMakeLists.txt).
+# This overlay holds only the test-app-relative partition path and
+# test-only options.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../../../espnetlink_partitions_table.csv"
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+# Test-only: the serial-capture harness reads at 115200.
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
