@@ -155,6 +155,19 @@ void test_usb_data_switchable(void)
     TEST_ASSERT_TRUE(wmc_usb_data_switchable(WIFI_MODEM_USB_POWER_ONLY));
 }
 
+void test_boot_cut_route(void)
+{
+    /* power_only: always cut, hint irrelevant */
+    TEST_ASSERT_TRUE(wmc_boot_cut_route(WIFI_MODEM_USB_POWER_ONLY, false));
+    TEST_ASSERT_TRUE(wmc_boot_cut_route(WIFI_MODEM_USB_POWER_ONLY, true));
+    /* auto: the boot-cut hint decides (the paired-WiCAN steady state) */
+    TEST_ASSERT_FALSE(wmc_boot_cut_route(WIFI_MODEM_USB_AUTO, false));
+    TEST_ASSERT_TRUE(wmc_boot_cut_route(WIFI_MODEM_USB_AUTO, true));
+    /* ncm: locked on — a stale hint must be ignored */
+    TEST_ASSERT_FALSE(wmc_boot_cut_route(WIFI_MODEM_USB_NCM, false));
+    TEST_ASSERT_FALSE(wmc_boot_cut_route(WIFI_MODEM_USB_NCM, true));
+}
+
 /* Credentials only leave over a non-WiFi interface: the USB link passes,
  * the AP and STA addresses are refused, unknown local address refused. */
 void test_credentials_gate(void)
@@ -412,6 +425,7 @@ void app_main(void)
     UNITY_BEGIN();
     RUN_TEST(test_usb_mode_strings);
     RUN_TEST(test_usb_data_switchable);
+    RUN_TEST(test_boot_cut_route);
     RUN_TEST(test_credentials_gate);
     RUN_TEST(test_password_policy_helpers);
     RUN_TEST(test_password_generator);

@@ -8,6 +8,18 @@
 extern "C" {
 #endif
 
+typedef enum
+{
+    USB_DEV_ETHERNET_CLASS_NCM = 0,
+    USB_DEV_ETHERNET_CLASS_RNDIS,
+} usb_dev_ethernet_class_t;
+
+// Settings descriptor "usb_dev_ethernet" v1 (`class`: ncm|rndis, default
+// per Kconfig USBNET_CLASS). Register with the other settings init steps;
+// the boot apply decides which class usb_dev_ethernet_start() presents.
+esp_err_t usb_dev_ethernet_register_settings(void);
+usb_dev_ethernet_class_t usb_dev_ethernet_class(void);
+
 esp_err_t usb_dev_ethernet_start(void);
 
 // Optional CDC-ACM console alongside RNDIS.

@@ -25,6 +25,36 @@ against, plus the concrete work list for `meatpi-components`
 Budget: dongle boot → cut in **≤ 10 s**. No pairing state on the dongle,
 nothing to un-pair, no reboot on either side after the first pairing.
 
+**2026-08-24 addendum — the boot-cut hint (`wifi_modem.boot_cut`).** The
+flow above is now only the FIRST-pairing / key-re-read path. A
+host-requested cut arms a device-state hint; every later boot in
+`usb_mode=auto` cuts the data lines at ~3 s, before the USB device stack
+starts — the WiCAN sees no USB device at all (its machine stays `idle`),
+joins the AP as usual, and **GPS acquires from power-on with a quiet
+bus** (no desense window, nothing to kill). Self-healing: if no station
+joins the AP within 60 s the dongle restores the lines and clears the
+hint (a PC gets tethering back one boot late; a WiCAN needing a key
+re-read gets its USB channel after the same 60 s — VBUS-cycle recovery
+is therefore ~75 s worst case). Any runtime `usb_data=1` restore or a
+factory reset clears the hint. Correspondingly the WiCAN **no longer
+VBUS-power-cycles at host start** (its connector mux provides the DWC2
+connect edge), so a WiCAN reboot never reboots the dongle or costs a fix.
+
+**2026-08-25 addendum — runtime USB Ethernet class (NCM / RNDIS).** The
+USB device class is now selected at RUNTIME from the new
+`usb_dev_ethernet` settings descriptor (v1, one field: `class` =
+`ncm`|`rndis`, default `ncm`; Kconfig `USBNET_CLASS` only sets that
+default now, and CDC-ECM was dropped). Both classes compile in; the
+choice is consumed once at `usb_dev_ethernet_start()` (reboot-to-apply).
+A WiCAN host in `mode=usb_ncm` / `mode=usb_rndis` makes the dongle match
+during its ensure-share pass: `GET /api/settings/usb_dev_ethernet` ->
+`class` differs -> PUT + `POST /api/settings/submit` (ONE dongle reboot,
+shared with the `ncm_share` flip when both change). Firmware without the
+descriptor answers 404 and the WiCAN stays on the dongle's built-in
+class. Everything else (VID/PID 303A:4007, 192.168.7.1, the composite
+CDC-ACM console, the cut contract and the boot-cut hint) is
+class-independent.
+
 ## 2. Dongle contract (what the WiCAN can rely on)
 
 ### 2.1 USB

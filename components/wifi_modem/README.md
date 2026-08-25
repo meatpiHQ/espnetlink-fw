@@ -73,14 +73,18 @@ AP netif must exist).
 | `usb_mode` | enum `auto`,`ncm`,`power_only` | `auto` | `auto`: boot with USB data on (NCM + CDC, today's PC behaviour) and let the host cut it at runtime — the WiCAN flow. `ncm`: USB data locked on (runtime cut refused with 409). `power_only`: cut at boot (charger-powered, AP only). |
 | `ap_share` | bool | `true` | NAPT the AP netif into the LTE uplink + DNS proxy. |
 | `ap_password_provisioned` | bool | `false` | Set once by the provisioning step. Never cleared by firmware; a factory reset starts over. |
+| `boot_cut` | bool | `false` | Device state, not user config (2026-08-24): the last runtime `usb_data` change was a CUT by a host. In `auto`, the next boot cuts the lines at the mux immediately (before the USB stack starts) so **GPS acquires from power-on with a quiet bus** — the paired-WiCAN steady state, no USB desense window at all. Self-heals: if no station joins the AP within 60 s the lines are restored and the hint cleared (a PC on the cable gets its tethering back, one boot late). Any runtime restore (`usb_data=1`, API or console) clears it; factory reset clears it. |
 | `cli` | bool | `true` | Register the `wifi_modem` console command at boot. |
 
-**Why `auto` is the default.** The dongle stays stateless about who is on
-the cable: it always boots with USB data on, so a PC gets tethering as
-before and a WiCAN gets a point-to-point channel to read the AP key and
-then cut the data lines — every boot, no pairing state, no button, no
-reboot. A device that is power-cycled in front of a new WiCAN just gets
-read again.
+**Why `auto` is the default.** The dongle stays (almost) stateless about
+who is on the cable: with no `boot_cut` hint it boots with USB data on,
+so a PC gets tethering as before and a WiCAN gets a point-to-point
+channel to read the AP key and then cut the data lines — no pairing
+state, no button, no reboot. A device that is power-cycled in front of a
+new WiCAN just gets read again. The `boot_cut` hint is the one soft
+exception: it only records the LAST owner's cut so repeat boots skip the
+USB window entirely, and it un-learns itself (60 s no-AP-client restore)
+whenever the owner stops being a cutting host.
 
 ## AP password provisioning
 
@@ -164,13 +168,22 @@ time the dongle boots on a WiCAN's USB port:
    WiCAN sees the USB device drop (expected) and joins the AP when it
    needs the uplink.
 
-No pairing state on the dongle, nothing to un-pair: a new WiCAN reads the
-key on the next power-on (the WiCAN can force one by cycling VBUS). A PC
-on the cable never sends step 3; it keeps the link as a control channel
-(web UI at 192.168.7.1) — the USB DHCP offers no default router unless
-`lte_upstream_pppos.ncm_share` is on, so the PC's internet never drifts
-onto the LTE link. Manual override: `wifi_modem -u ncm|power_only` /
-settings PUT + reboot.
+Step 3 also arms the `boot_cut` hint: **every later boot cuts the lines
+at ~3 s, before the USB device stack starts** — the WiCAN never touches
+USB again (it just joins the AP) and GPS acquires from power-on with a
+quiet bus (bench 2026-08-24: cut at 3.3 s, WiCAN on the AP at 10 s, zero
+enumerations). Nothing to un-pair: a key re-read (rotated key, swapped
+WiCAN) rides the self-restore — the WiCAN cycles VBUS, the dongle boots
+cut, nobody joins the AP, and 60 s later the lines return for the read
+(~75 s worst case). A PC on the cable never sends step 3; it keeps the
+link as a control channel (web UI at 192.168.7.1) — the USB DHCP offers
+no default router unless `lte_upstream_pppos.ncm_share` is on, so the
+PC's internet never drifts onto the LTE link. A dongle moved from a car
+to a PC self-restores the same way (first boot: tethering appears after
+60 s; the hint clears, so later boots are immediate). Manual override:
+`wifi_modem -u ncm|power_only` / settings PUT + reboot; `wifi_modem -d 1`
+or `POST /api/wifi_modem/usb_data {"enabled":true}` restores the lines
+now and clears the hint.
 
 ## Memory footprint (estimated — replace with measured before release)
 

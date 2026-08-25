@@ -961,6 +961,11 @@ PAGES.cellular=async(view)=>{
     wrap.append(card("Modem Settings","settings",...rows,
       note("","APN credentials come from your SIM provider; leave user/password empty unless the carrier requires them. Changes apply after Submit + restart.")));
   }catch(e){wrap.append(banner("crit","alert",e.message));}
+  try{
+    const usbRows=await settingsForm("usb_dev_ethernet");
+    if(usbRows.length)wrap.append(card("USB Ethernet","cpu",...usbRows,
+      note("","Which USB network class the device presents on its USB-C port (192.168.7.1). CDC-NCM works in-box on Windows 11 / macOS / Linux; RNDIS is for legacy Windows 10 hosts. A WiCAN host in usb_ncm / usb_rndis mode sets this automatically to match its own setting. Applies after Submit + restart.")));
+  }catch{/* older build without the descriptor */}
   const t=setInterval(()=>{if(conn.state==="online")status();},5000);return()=>clearInterval(t);
 };
 
@@ -1359,7 +1364,7 @@ const NICE={wifi_manager:"Wi-Fi",mdns_manager:"mDNS",vpn_manager:"VPN",
   lte_upstream_pppos:"Cellular (LTE)",gps:"GPS / GNSS",imu_manager:"Motion (IMU)",
   ha_webhooks:"Home Assistant",cert_manager:"Certificates",log_manager:"Logging",
   dev_status_manager:"Status flags",restart_tracker:"Restart tracking",
-  cmdline_manager:"Console",usb_cli_console:"USB console",filesystem:"Filesystem",
+  cmdline_manager:"Console",usb_cli_console:"USB console",usb_dev_ethernet:"USB Ethernet",filesystem:"Filesystem",
   system:"System"};
 const HIDE=new Set(["main_bench"]);
 function niceName(n){return NICE[n]||n.replace(/_manager$/,"").replaceAll("_"," ").replace(/\b\w/g,c=>c.toUpperCase());}

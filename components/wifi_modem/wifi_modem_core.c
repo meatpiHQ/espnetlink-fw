@@ -50,6 +50,15 @@ bool wmc_usb_mode_parse(const char *s, wifi_modem_usb_mode_t *out)
     return false;
 }
 
+bool wmc_boot_cut_route(wifi_modem_usb_mode_t mode, bool boot_cut_hint)
+{
+    if (mode == WIFI_MODEM_USB_POWER_ONLY)
+    {
+        return true;
+    }
+    return mode == WIFI_MODEM_USB_AUTO && boot_cut_hint;
+}
+
 bool wmc_usb_data_switchable(wifi_modem_usb_mode_t mode)
 {
     return mode != WIFI_MODEM_USB_NCM;

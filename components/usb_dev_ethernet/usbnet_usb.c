@@ -20,6 +20,9 @@
 
 #include "usb_cli_console.h"
 
+#include "usbd_cdc_ncm.h"
+#include "usbd_rndis.h"
+
 #include "private/usbnet_class.h"
 #include "private/usbnet_dns_proxy.h"
 #include "private/usbnet_lwip.h"
@@ -49,22 +52,13 @@ static const char *TAG = "usb_dev_ethernet";
 #define CDC_MAX_MPS 64
 #endif
 
-#if CONFIG_USBNET_CLASS_NCM
-#define USBNET_ETH_DESCRIPTOR_LEN CDC_NCM_ALT_DESCRIPTOR_LEN
-#define USBNET_ETH_DESCRIPTOR_INIT(first, int_ep, out_ep, in_ep, mps, str) \
-    CDC_NCM_ALT_DESCRIPTOR_INIT(first, int_ep, out_ep, in_ep, mps, 1514, str)
-#elif CONFIG_USBNET_CLASS_ECM
-#define USBNET_ETH_DESCRIPTOR_LEN CDC_ECM_DESCRIPTOR_LEN
-#define USBNET_ETH_DESCRIPTOR_INIT(first, int_ep, out_ep, in_ep, mps, str) \
-    CDC_ECM_DESCRIPTOR_INIT(first, int_ep, out_ep, in_ep, mps, str)
-#else
-#define USBNET_ETH_DESCRIPTOR_LEN CDC_RNDIS_DESCRIPTOR_LEN
-#define USBNET_ETH_DESCRIPTOR_INIT(first, int_ep, out_ep, in_ep, mps, str) \
-    CDC_RNDIS_DESCRIPTOR_INIT(first, int_ep, out_ep, in_ep, mps, str)
-#endif
-
-#define USB_CONFIG_SIZE_ETH     (9 + USBNET_ETH_DESCRIPTOR_LEN)
-#define USB_CONFIG_SIZE_ETH_CDC (9 + USBNET_ETH_DESCRIPTOR_LEN + CDC_ACM_DESCRIPTOR_LEN)
+/* Both classes are runtime-selectable (usbnet_class_select, set before
+ * usbnet_usb_start from the usb_dev_ethernet `class` setting) — one config
+ * descriptor per (class, console) combination, picked in the callback. */
+#define USB_CONFIG_SIZE_NCM       (9 + CDC_NCM_ALT_DESCRIPTOR_LEN)
+#define USB_CONFIG_SIZE_NCM_CDC   (9 + CDC_NCM_ALT_DESCRIPTOR_LEN + CDC_ACM_DESCRIPTOR_LEN)
+#define USB_CONFIG_SIZE_RNDIS     (9 + CDC_RNDIS_DESCRIPTOR_LEN)
+#define USB_CONFIG_SIZE_RNDIS_CDC (9 + CDC_RNDIS_DESCRIPTOR_LEN + CDC_ACM_DESCRIPTOR_LEN)
 
 static bool s_console_enabled = false;
 
@@ -91,14 +85,26 @@ static const uint8_t s_device_descriptor[] = {
     USB_DEVICE_DESCRIPTOR_INIT(USB_2_0, 0xEF, 0x02, 0x01, USBD_VID, USBD_PID, 0x0100, 0x01),
 };
 
-static const uint8_t s_config_descriptor_eth[] = {
-    USB_CONFIG_DESCRIPTOR_INIT(USB_CONFIG_SIZE_ETH, 0x02, 0x01, USB_CONFIG_BUS_POWERED, USBD_MAX_POWER_MA),
-    USBNET_ETH_DESCRIPTOR_INIT(0x00, CDC_INT_EP, CDC_OUT_EP, CDC_IN_EP, CDC_MAX_MPS, USB_STRING_ETH_INTF_INDEX),
+static const uint8_t s_config_descriptor_ncm[] = {
+    USB_CONFIG_DESCRIPTOR_INIT(USB_CONFIG_SIZE_NCM, 0x02, 0x01, USB_CONFIG_BUS_POWERED, USBD_MAX_POWER_MA),
+    CDC_NCM_ALT_DESCRIPTOR_INIT(0x00, CDC_INT_EP, CDC_OUT_EP, CDC_IN_EP, CDC_MAX_MPS, 1514, USB_STRING_ETH_INTF_INDEX),
 };
 
-static const uint8_t s_config_descriptor_eth_cdc[] = {
-    USB_CONFIG_DESCRIPTOR_INIT(USB_CONFIG_SIZE_ETH_CDC, 0x04, 0x01, USB_CONFIG_BUS_POWERED, USBD_MAX_POWER_MA),
-    USBNET_ETH_DESCRIPTOR_INIT(0x00, CDC_INT_EP, CDC_OUT_EP, CDC_IN_EP, CDC_MAX_MPS, USB_STRING_ETH_INTF_INDEX),
+static const uint8_t s_config_descriptor_ncm_cdc[] = {
+    USB_CONFIG_DESCRIPTOR_INIT(USB_CONFIG_SIZE_NCM_CDC, 0x04, 0x01, USB_CONFIG_BUS_POWERED, USBD_MAX_POWER_MA),
+    CDC_NCM_ALT_DESCRIPTOR_INIT(0x00, CDC_INT_EP, CDC_OUT_EP, CDC_IN_EP, CDC_MAX_MPS, 1514, USB_STRING_ETH_INTF_INDEX),
+    // CDC-ACM console uses interface numbers 0x02 and 0x03
+    CDC_ACM_DESCRIPTOR_INIT(0x02, 0x84, 0x04, 0x82, CDC_MAX_MPS, USB_STRING_CONSOLE_INTF_INDEX),
+};
+
+static const uint8_t s_config_descriptor_rndis[] = {
+    USB_CONFIG_DESCRIPTOR_INIT(USB_CONFIG_SIZE_RNDIS, 0x02, 0x01, USB_CONFIG_BUS_POWERED, USBD_MAX_POWER_MA),
+    CDC_RNDIS_DESCRIPTOR_INIT(0x00, CDC_INT_EP, CDC_OUT_EP, CDC_IN_EP, CDC_MAX_MPS, USB_STRING_ETH_INTF_INDEX),
+};
+
+static const uint8_t s_config_descriptor_rndis_cdc[] = {
+    USB_CONFIG_DESCRIPTOR_INIT(USB_CONFIG_SIZE_RNDIS_CDC, 0x04, 0x01, USB_CONFIG_BUS_POWERED, USBD_MAX_POWER_MA),
+    CDC_RNDIS_DESCRIPTOR_INIT(0x00, CDC_INT_EP, CDC_OUT_EP, CDC_IN_EP, CDC_MAX_MPS, USB_STRING_ETH_INTF_INDEX),
     // CDC-ACM console uses interface numbers 0x02 and 0x03
     CDC_ACM_DESCRIPTOR_INIT(0x02, 0x84, 0x04, 0x82, CDC_MAX_MPS, USB_STRING_CONSOLE_INTF_INDEX),
 };
@@ -145,12 +151,14 @@ static const uint8_t *config_descriptor_callback(uint8_t speed)
 {
     (void)speed;
 
-    if (s_console_enabled)
+    if (usbnet_class_kind() == USBNET_CLASS_KIND_RNDIS)
     {
-        return s_config_descriptor_eth_cdc;
+        return s_console_enabled ? s_config_descriptor_rndis_cdc
+                                 : s_config_descriptor_rndis;
     }
 
-    return s_config_descriptor_eth;
+    return s_console_enabled ? s_config_descriptor_ncm_cdc
+                             : s_config_descriptor_ncm;
 }
 
 static const uint8_t *device_quality_descriptor_callback(uint8_t speed)
@@ -185,37 +193,44 @@ static const char *string_descriptor_callback(uint8_t speed, uint8_t index)
                            mac[4],
                            mac[5]);
 
-#if CONFIG_USBNET_CLASS_ECM || CONFIG_USBNET_CLASS_NCM
-            /* iMACAddress: the MAC the HOST adapter uses — same locally
-             * administered dev_mac^1 the RNDIS build assigns (set up in
-             * usbnet_usb_start before usbd_initialize). */
-            const uint8_t *hm = usbnet_state()->rndis_host_mac;
+            if (usbnet_class_kind() == USBNET_CLASS_KIND_NCM)
+            {
+                /* iMACAddress: the MAC the HOST adapter uses — same
+                 * locally administered dev_mac^1 the RNDIS class assigns
+                 * (set up in usbnet_usb_start before usbd_initialize). */
+                const uint8_t *hm = usbnet_state()->rndis_host_mac;
 
-            (void)snprintf(s_eth_string_descriptor,
-                           sizeof(s_eth_string_descriptor),
-                           "%02X%02X%02X%02X%02X%02X",
-                           hm[0], hm[1], hm[2], hm[3], hm[4], hm[5]);
-#else
-            (void)snprintf(s_eth_string_descriptor,
-                           sizeof(s_eth_string_descriptor),
-                           "RNDIS %02X%02X%02X%02X%02X%02X",
-                           mac[0],
-                           mac[1],
-                           mac[2],
-                           mac[3],
-                           mac[4],
-                           mac[5]);
-#endif
+                (void)snprintf(s_eth_string_descriptor,
+                               sizeof(s_eth_string_descriptor),
+                               "%02X%02X%02X%02X%02X%02X",
+                               hm[0], hm[1], hm[2], hm[3], hm[4], hm[5]);
+            }
+            else
+            {
+                /* RNDIS: index 4 is a display name, not iMACAddress */
+                (void)snprintf(s_eth_string_descriptor,
+                               sizeof(s_eth_string_descriptor),
+                               "RNDIS %02X%02X%02X%02X%02X%02X",
+                               mac[0],
+                               mac[1],
+                               mac[2],
+                               mac[3],
+                               mac[4],
+                               mac[5]);
+            }
         }
         else
         {
             ESP_LOGW(TAG, "esp_read_mac failed for USB string (%d)", (int)err);
             (void)snprintf(s_serial_string_descriptor, sizeof(s_serial_string_descriptor), "000000000003");
-#if CONFIG_USBNET_CLASS_ECM || CONFIG_USBNET_CLASS_NCM
-            (void)snprintf(s_eth_string_descriptor, sizeof(s_eth_string_descriptor), "020000000002");
-#else
-            (void)snprintf(s_eth_string_descriptor, sizeof(s_eth_string_descriptor), "RNDIS");
-#endif
+            if (usbnet_class_kind() == USBNET_CLASS_KIND_NCM)
+            {
+                (void)snprintf(s_eth_string_descriptor, sizeof(s_eth_string_descriptor), "020000000002");
+            }
+            else
+            {
+                (void)snprintf(s_eth_string_descriptor, sizeof(s_eth_string_descriptor), "RNDIS");
+            }
         }
     }
 
@@ -284,21 +299,9 @@ void usbnet_usb_notify_link(bool up)
     usbnet_notify_evt(up ? USBNET_EVT_LINK_UP : USBNET_EVT_LINK_DOWN);
 }
 
-/* RNDIS/ECM data callbacks (NCM's live in usbnet_ncm.c — its RX needs the
- * NTB length latched before the wake) */
-#if CONFIG_USBNET_CLASS_ECM
-void usbd_cdc_ecm_data_recv_done(uint32_t len)
-{
-    (void)len;
-    usbnet_usb_notify_rx();
-}
-
-void usbd_cdc_ecm_data_send_done(uint32_t len)
-{
-    (void)len;
-    usbnet_usb_notify_tx_done();
-}
-#elif CONFIG_USBNET_CLASS_RNDIS
+/* RNDIS data callbacks (NCM's live in usbnet_ncm.c — its RX needs the
+ * NTB length latched before the wake). Per-class symbol names, so both
+ * sets link; only the registered class's set ever fires. */
 void usbd_rndis_data_recv_done(uint32_t len)
 {
     (void)len;
@@ -310,7 +313,6 @@ void usbd_rndis_data_send_done(uint32_t len)
     (void)len;
     usbnet_usb_notify_tx_done();
 }
-#endif
 
 static void usbnet_rx_task(void *arg)
 {
@@ -339,55 +341,60 @@ static void usbnet_evt_task(void *arg)
         uint32_t bits = 0;
         (void)xTaskNotifyWait(0, UINT32_MAX, &bits, portMAX_DELAY);
 
-#if CONFIG_USBNET_CLASS_NCM
-        /* NCM: the data path opens when the host selects data alt 1
-         * (link_event), NOT at set-configuration — the data endpoints
-         * don't exist in alt 0. CONFIGURED only arms the console. */
-        if ((bits & (USBNET_EVT_DISCONNECT | USBNET_EVT_LINK_DOWN)) != 0u)
+        if (usbnet_class_kind() == USBNET_CLASS_KIND_NCM)
         {
-            ESP_LOGI(TAG, "USB %s", (bits & USBNET_EVT_DISCONNECT) != 0u
-                                        ? "disconnected/reset" : "NCM link down");
-            usbnet_ncm_stop();
-            (void)tcpip_callback_with_block(usbnet_lwip_stop_in_tcpip, NULL, 1);
-        }
-
-        if ((bits & USBNET_EVT_CONFIGURED) != 0u)
-        {
-            ESP_LOGI(TAG, "USB configured");
-
-            if (s_console_enabled)
+            /* NCM: the data path opens when the host selects data alt 1
+             * (link_event), NOT at set-configuration — the data endpoints
+             * don't exist in alt 0. CONFIGURED only arms the console. */
+            if ((bits & (USBNET_EVT_DISCONNECT | USBNET_EVT_LINK_DOWN)) != 0u)
             {
-                usb_cli_console_usb_on_configured(0);
-            }
-        }
-
-        if ((bits & USBNET_EVT_LINK_UP) != 0u)
-        {
-            ESP_LOGI(TAG, "NCM link up (data alt 1)");
-            usbnet_ncm_start();
-            (void)tcpip_callback_with_block(usbnet_lwip_start_in_tcpip, NULL, 1);
-        }
-#else
-        if ((bits & USBNET_EVT_DISCONNECT) != 0u)
-        {
-            ESP_LOGI(TAG, "USB disconnected/reset");
-            usbnet_class_set_connect(false);
-            (void)tcpip_callback_with_block(usbnet_lwip_stop_in_tcpip, NULL, 1);
-        }
-
-        if ((bits & USBNET_EVT_CONFIGURED) != 0u)
-        {
-            ESP_LOGI(TAG, "USB configured");
-            usbnet_class_set_connect(true);
-
-            if (s_console_enabled)
-            {
-                usb_cli_console_usb_on_configured(0);
+                ESP_LOGI(TAG, "USB %s", (bits & USBNET_EVT_DISCONNECT) != 0u
+                                            ? "disconnected/reset" : "NCM link down");
+                usbnet_ncm_stop();
+                (void)tcpip_callback_with_block(usbnet_lwip_stop_in_tcpip, NULL, 1);
             }
 
-            (void)tcpip_callback_with_block(usbnet_lwip_start_in_tcpip, NULL, 1);
+            if ((bits & USBNET_EVT_CONFIGURED) != 0u)
+            {
+                ESP_LOGI(TAG, "USB configured");
+
+                if (s_console_enabled)
+                {
+                    usb_cli_console_usb_on_configured(0);
+                }
+            }
+
+            if ((bits & USBNET_EVT_LINK_UP) != 0u)
+            {
+                ESP_LOGI(TAG, "NCM link up (data alt 1)");
+                usbnet_ncm_start();
+                (void)tcpip_callback_with_block(usbnet_lwip_start_in_tcpip, NULL, 1);
+            }
         }
-#endif
+        else
+        {
+            /* RNDIS: the data path opens at set-configuration; the device
+             * asserts carrier itself (usbd_rndis_set_connect). */
+            if ((bits & USBNET_EVT_DISCONNECT) != 0u)
+            {
+                ESP_LOGI(TAG, "USB disconnected/reset");
+                usbnet_class_set_connect(false);
+                (void)tcpip_callback_with_block(usbnet_lwip_stop_in_tcpip, NULL, 1);
+            }
+
+            if ((bits & USBNET_EVT_CONFIGURED) != 0u)
+            {
+                ESP_LOGI(TAG, "USB configured");
+                usbnet_class_set_connect(true);
+
+                if (s_console_enabled)
+                {
+                    usb_cli_console_usb_on_configured(0);
+                }
+
+                (void)tcpip_callback_with_block(usbnet_lwip_start_in_tcpip, NULL, 1);
+            }
+        }
     }
 }
 
@@ -510,8 +517,8 @@ void usbnet_usb_start(void)
     st->rndis_host_mac[0] = (uint8_t)((st->rndis_host_mac[0] | 0x02) & 0xFE);
 
     ESP_LOGI(TAG,
-             "Starting CherryUSB " USBNET_CLASS_NAME
-             "%s (netif MAC %02X:%02X:%02X:%02X:%02X:%02X, host adapter MAC %02X:%02X:%02X:%02X:%02X:%02X)",
+             "Starting CherryUSB %s%s (netif MAC %02X:%02X:%02X:%02X:%02X:%02X, host adapter MAC %02X:%02X:%02X:%02X:%02X:%02X)",
+             usbnet_class_name(),
              s_console_enabled ? "+CDC" : "",
              dev_mac[0],
              dev_mac[1],
@@ -534,18 +541,18 @@ void usbnet_usb_start(void)
 #endif
 
     // Add interfaces in the exact order they appear in the config descriptor:
-    // - USB Ethernet (ECM or RNDIS): interfaces 0..1
+    // - USB Ethernet (NCM or RNDIS): interfaces 0..1
     // - CDC-ACM console (optional): interfaces 2..3
-#if CONFIG_USBNET_CLASS_NCM
-    usbd_add_interface(0, usbd_cdc_ncm_init_intf(&s_eth_intf0, CDC_INT_EP, CDC_OUT_EP, CDC_IN_EP));
-    usbd_add_interface(0, usbd_cdc_ncm_init_data_intf(&s_eth_intf1));
-#elif CONFIG_USBNET_CLASS_ECM
-    usbd_add_interface(0, usbd_cdc_ecm_init_intf(&s_eth_intf0, CDC_INT_EP, CDC_OUT_EP, CDC_IN_EP));
-    usbd_add_interface(0, usbd_cdc_ecm_init_intf(&s_eth_intf1, CDC_INT_EP, CDC_OUT_EP, CDC_IN_EP));
-#else
-    usbd_add_interface(0, usbd_rndis_init_intf(&s_eth_intf0, CDC_OUT_EP, CDC_IN_EP, CDC_INT_EP, st->rndis_host_mac));
-    usbd_add_interface(0, usbd_rndis_init_intf(&s_eth_intf1, CDC_OUT_EP, CDC_IN_EP, CDC_INT_EP, st->rndis_host_mac));
-#endif
+    if (usbnet_class_kind() == USBNET_CLASS_KIND_NCM)
+    {
+        usbd_add_interface(0, usbd_cdc_ncm_init_intf(&s_eth_intf0, CDC_INT_EP, CDC_OUT_EP, CDC_IN_EP));
+        usbd_add_interface(0, usbd_cdc_ncm_init_data_intf(&s_eth_intf1));
+    }
+    else
+    {
+        usbd_add_interface(0, usbd_rndis_init_intf(&s_eth_intf0, CDC_OUT_EP, CDC_IN_EP, CDC_INT_EP, st->rndis_host_mac));
+        usbd_add_interface(0, usbd_rndis_init_intf(&s_eth_intf1, CDC_OUT_EP, CDC_IN_EP, CDC_INT_EP, st->rndis_host_mac));
+    }
 
     if (s_console_enabled)
     {

@@ -15,10 +15,6 @@
  *        a staging frame and usbd_cdc_ncm_eth_start_write() builds the
  *        NTB16 around it.
  */
-#include "sdkconfig.h"
-
-#if CONFIG_USBNET_CLASS_NCM
-
 #include <string.h>
 
 #include "esp_heap_caps.h"
@@ -190,5 +186,3 @@ int usbnet_ncm_eth_tx(struct pbuf *p)
 
     return (ret < 0) ? ret : 0;
 }
-
-#endif /* CONFIG_USBNET_CLASS_NCM */

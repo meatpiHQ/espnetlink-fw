@@ -34,6 +34,15 @@ static const settings_field_t FIELDS[] =
        replaced (or a custom one was found). Never cleared by the firmware;
        a factory reset starts the provisioning over. */
     SETTINGS_BOOL("ap_password_provisioned", false),
+    /* device state, not user config (the ap_password_provisioned pattern):
+       the last runtime usb_data change was a CUT by a host. usb_mode=auto
+       then cuts the lines AT BOOT (the paired-WiCAN steady state: GPS
+       acquires from power-on with a quiet bus, and the host never needs
+       the USB link again) and self-restores + clears this after 60 s
+       when no station joins the AP — a PC on the cable gets its
+       tethering back, one boot late. Cleared by any runtime restore and
+       by factory reset. */
+    SETTINGS_BOOL("boot_cut", false),
     SETTINGS_BOOL("cli", true),
 };
 
@@ -86,6 +95,7 @@ static esp_err_t on_apply(const cJSON *settings)
     s_cfg.ap_share = get_bool(settings, "ap_share", true);
     s_cfg.ap_password_provisioned =
         get_bool(settings, "ap_password_provisioned", false);
+    s_cfg.boot_cut = get_bool(settings, "boot_cut", false);
     s_cfg.cli = get_bool(settings, "cli", true);
     s_configured = true;
 

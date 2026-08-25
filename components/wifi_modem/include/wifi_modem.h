@@ -79,6 +79,14 @@ typedef struct
     wifi_modem_usb_mode_t usb_mode;
     bool ap_share;                 /**< NAPT the AP netif into the LTE uplink */
     bool ap_password_provisioned;  /**< per-device AP password already set    */
+    bool boot_cut;                 /**< device state, not user config: the
+                                        last runtime usb_data change was a
+                                        CUT by a host — in usb_mode=auto the
+                                        next boot cuts the lines immediately
+                                        (GPS acquires from t=0, no USB
+                                        desense window) and self-restores
+                                        after 60 s if no station joins the
+                                        AP (a PC, not a WiCAN, on the cable) */
     bool cli;
 } wifi_modem_settings_t;
 

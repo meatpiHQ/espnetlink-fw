@@ -430,6 +430,8 @@ void app_main(void)
     /* product components register their settings descriptors (§4.1);
      * their console commands register from the settings boot apply,
      * gated by each component's `cli` setting (§6b) */
+    init_step("usb_dev_ethernet_register_settings",
+              usb_dev_ethernet_register_settings);
     init_step("lte_upstream_pppos_register_settings",
               lte_upstream_pppos_register_settings);
     init_step("gps_register_settings", gps_register_settings);

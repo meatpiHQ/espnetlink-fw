@@ -2683,7 +2683,6 @@ CONFIG_ML_DEVICE_NAME=""
 #
 CONFIG_USBNET_CLASS_NCM=y
 # CONFIG_USBNET_CLASS_RNDIS is not set
-# CONFIG_USBNET_CLASS_ECM is not set
 # end of USB Ethernet (usb_dev_ethernet)
 
 #

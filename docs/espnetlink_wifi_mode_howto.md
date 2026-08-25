@@ -46,10 +46,20 @@ as NCM + CDC (USB data on), then:
      the USB device drop (expected) and joins the AP when it needs the
      uplink; GPS acquires undisturbed.
 
-No pairing state on the dongle, nothing to un-pair, no reboot: a new or
-factory-reset WiCAN simply reads the key again at the dongle's next
-power-on (the WiCAN can force one by cycling VBUS — `wusb power off/on`).
-The whole sequence costs ~5–10 s of USB link per cold start.
+Since 2026-08-24 the sequence above runs only when it has to: the host's
+cut arms the **`boot_cut` hint**, and every later boot in `usb_mode=auto`
+cuts the data lines at ~3 s — before the USB device stack starts — so a
+paired dongle boots straight into quiet-bus GPS acquisition and the WiCAN
+never touches USB again (it just joins the AP). The hint self-heals: no
+station on the AP within 60 s restores the lines and clears it (a PC gets
+tethering back one boot late; a WiCAN that needs a fresh key read gets
+its USB channel the same way, ~75 s worst case after a VBUS cycle). A
+runtime restore (`wifi_modem -d 1` / `POST /api/wifi_modem/usb_data
+{"enabled":true}`) clears it immediately. No other pairing state, nothing
+to un-pair, no reboot: a new or factory-reset WiCAN reads the key again
+whenever the USB link is up (first boot, after the self-restore, or a
+forced VBUS cycle). The first-pairing sequence costs ~5–10 s of USB link;
+repeat boots cost none.
 
 Manual overrides (settings PUT / `wifi_modem -u …` + reboot):
 `usb_mode=ncm` locks the data lines on (the cut is refused with 409);
@@ -104,9 +114,13 @@ device, no reboot.
 ### 2.3 WiCAN
 
 Firmware with the `espnetlink_link` component (meatpi-components). The
-zero-touch sequence of §2.1 (USB detect → credentials → usb_data off →
-join when needed) is the WiCAN-side work item still open; until it lands
-the manual pairing path works with the key from `wifi_modem -k`:
+zero-touch sequence of §2.1 is IMPLEMENTED there (2026-08-24,
+bench-verified: attach → identify → credentials → cut in ~2 s of USB
+link; the boot-cut steady state joins the AP with no USB contact at
+all). Nothing to configure — `espnetlink.enabled=true`,
+`mode=wifi_modem`, `auto_pair=true` are the defaults. The manual pairing
+path below still works when USB is not an option (key from
+`wifi_modem -k`):
 
 - WiFi: mode `apsta`, primary STA = the home network; leave a fallback
   slot free for the dongle.

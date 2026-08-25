@@ -213,6 +213,7 @@ static esp_err_t wifi_modem_get_handler(httpd_req_t *req)
 
     cJSON_AddStringToObject(o, "usb_mode", wmc_usb_mode_str(cfg->usb_mode));
     cJSON_AddBoolToObject(o, "usb_data", wifi_modem_usb_data_routed());
+    cJSON_AddBoolToObject(o, "boot_cut", wifi_modem_boot_cut_hint());
     cJSON_AddBoolToObject(o, "ap_share", cfg->ap_share);
     cJSON_AddBoolToObject(o, "napt", wifi_modem_napt_active());
     add_ap(o);
@@ -354,6 +355,11 @@ static esp_err_t usb_data_post_handler(httpd_req_t *req)
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
                                    esp_err_to_name(err));
     }
+
+    /* the request IS the owner's intent: arm/clear the boot-cut hint here
+     * (httpd task = internal stack; the deferred apply runs on the
+     * esp_timer task, which must not touch the settings store) */
+    wifi_modem_hint_note(enable);
 
     cJSON *o = cJSON_CreateObject();
 

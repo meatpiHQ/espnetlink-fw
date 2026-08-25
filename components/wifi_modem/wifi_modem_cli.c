@@ -51,10 +51,11 @@ static void print_status(void)
         (void)wmc_format_ipv4(wifi_modem_upstream_dns(), dns, sizeof(dns));
     }
 
-    cmdline_printf("usb_mode=%s usb_data=%d ap_share=%d napt=%d ap_ip=%s "
-                   "clients=%u upstream_dns=%s mux SEL1=%d SEL2=%d\n",
+    cmdline_printf("usb_mode=%s usb_data=%d boot_cut=%d ap_share=%d napt=%d "
+                   "ap_ip=%s clients=%u upstream_dns=%s mux SEL1=%d SEL2=%d\n",
                    wmc_usb_mode_str(cfg->usb_mode),
-                   (int)wifi_modem_usb_data_routed(), (int)cfg->ap_share,
+                   (int)wifi_modem_usb_data_routed(),
+                   (int)wifi_modem_boot_cut_hint(), (int)cfg->ap_share,
                    (int)wifi_modem_napt_active(), ap_ip,
                    (unsigned)wifi_manager_get_ap_station_count(), dns,
                    gpio_get_level(USB_SEL_1), gpio_get_level(USB_SEL_2));
@@ -91,6 +92,12 @@ static int cmd_wifi_modem(int argc, char **argv)
         bool on = s_args.data->ival[0] != 0;
         esp_err_t err = wifi_modem_usb_data_set(on);
 
+        if (err == ESP_OK)
+        {
+            /* the console is the owner's intent, like the HTTP path:
+             * a cut arms the boot-cut hint, a restore clears it */
+            wifi_modem_hint_note(on);
+        }
         cmdline_printf("usb_data=%d %s (SEL1=%d SEL2=%d)\n",
                        (int)wifi_modem_usb_data_routed(),
                        err == ESP_OK ? "ok" : esp_err_to_name(err),

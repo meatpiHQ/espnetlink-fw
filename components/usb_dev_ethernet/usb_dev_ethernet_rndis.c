@@ -1,4 +1,5 @@
 #include "usb_dev_ethernet.h"
+#include "private/usbnet_class.h"
 #include "private/usbnet_lwip.h"
 
 #include <stdbool.h>
@@ -56,6 +57,12 @@ static void usbnet_enable_sharing_in_tcpip(void *arg)
 
 esp_err_t usb_dev_ethernet_start(void)
 {
+    /* Consume the `class` setting once, before the descriptor tables and
+     * interface registration key off it (reboot-to-apply, standard §4). */
+    usbnet_class_select(usb_dev_ethernet_class() == USB_DEV_ETHERNET_CLASS_RNDIS
+                            ? USBNET_CLASS_KIND_RNDIS
+                            : USBNET_CLASS_KIND_NCM);
+
     esp_err_t err = esp_netif_init();
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE)
     {

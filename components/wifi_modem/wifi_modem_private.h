@@ -30,6 +30,11 @@ bool wmc_usb_mode_parse(const char *s, wifi_modem_usb_mode_t *out);
  *  (everything but ncm, which locks them on). */
 bool wmc_usb_data_switchable(wifi_modem_usb_mode_t mode);
 
+/** Whether the boot-time USB route is CUT: always for power_only; in auto
+ *  when the boot-cut hint is set (the last runtime change was a host cut);
+ *  never for ncm (locked on — a stale hint is ignored). */
+bool wmc_boot_cut_route(wifi_modem_usb_mode_t mode, bool boot_cut_hint);
+
 /**
  * Whether a credentials request that arrived on local address @p local_be
  * may be answered: only when it did NOT arrive on a WiFi interface (the AP
@@ -66,6 +71,21 @@ uint32_t wmc_pick_upstream_dns(uint32_t learned_be);
 
 /** Dotted quad of a network-order IPv4; false when @p out is too small. */
 bool wmc_format_ipv4(uint32_t addr_be, char *out, size_t out_len);
+
+/* ---- boot-cut hint (wifi_modem.c) ----------------------------------------- */
+
+/** Live value of the boot-cut hint (runtime shadow of the persisted key). */
+bool wifi_modem_boot_cut_hint(void);
+
+/**
+ * Record the operator/host intent behind a runtime usb_data change:
+ * a CUT arms the boot-cut hint (next boot cuts at the mux immediately),
+ * a RESTORE clears it. Persists through the settings store (change-guarded
+ * — no flash write when unchanged). MUST be called from an internal-RAM
+ * stack task (httpd / console / a worker): the settings store walks
+ * LittleFS on the caller's stack.
+ */
+void wifi_modem_hint_note(bool usb_data_enabled);
 
 /* ---- settings (wifi_modem_settings.c) ------------------------------------ */
 
