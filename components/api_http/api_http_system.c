@@ -22,7 +22,7 @@ static const char *TAG = "api_http";
 
 /* device-contract v2: the control-API level GET /api/info reports.
  * Bump when the /api surface changes incompatibly. */
-#define API_INFO_API_LEVEL 6
+#define API_INFO_API_LEVEL 7
 
 /* ---- GET /api/status ----------------------------------------------------------- */
 

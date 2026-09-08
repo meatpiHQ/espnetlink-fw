@@ -38,7 +38,7 @@ exist as far as the product is concerned.
 | `/api/settings/factory_reset` | POST | api_http (requires `{"confirm":"factory-reset"}`) |
 | `/api/status` | GET | api_http (dev_status_manager/HTTP_API.md) — bits, uptime, version, partition, boot counters, memory, temp — the HA "V6 detection" route |
 | `/api/status/tasks` | GET | api_http — task monitor (JSON) |
-| `/api/info` | GET | api_http — device identity (device_type/model/hw/fw/device_id/mac/api_level) |
+| `/api/info` | GET | api_http — device identity (device_type/model/hw/fw/device_id/mac/api_level). `api_level` 7 (2026-09-08) = the WiFi-modem surface: `/api/wifi_modem*`, the runtime `usb_dev_ethernet.class`; the WiCAN's `espnetlink_link` expects >= 7 and shows the level in its status (a July test build reporting 6 with none of those routes passed as an "ESPNetLink" for a whole field trip) |
 | `/api/restart` | POST | api_http (restart_tracker/HTTP_API.md) |
 | `/api/restart/history` | GET | api_http — retained boot forensics |
 | `/api/logs/ring` | GET, DELETE | api_http (log_manager/HTTP_API.md) — text/plain crash ring |
