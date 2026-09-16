@@ -32,10 +32,11 @@ real LTE vs self-hosted Headscale.
 | web_ui (browser settings/status/system UI at `/`) | ✅ | WiCAN v6 layout, ESPNetLink branding; nav pruned to Status/Settings/System/About; status page reads /api/lte + /api/gps + /api/vpn + /api/imu; gzip asset serving verified |
 | vpn_manager (WireGuard + Tailscale) + vendored esp_wireguard/wireguard_lwip/microlink | ✅ | **Both tunnels bench-PASSED over real LTE (2026-07-12):** WireGuard `VPN TARGET PASS` (vpn_bench_target.py vs the bench wg server — found+fixed the netif-address data-plane bug, BUG_WG_NETIF_ADDR.md; WiCAN carries the same bug) and Tailscale `TS TARGET PASS` (ts_bench_target.py vs self-hosted Headscale: register → 100.64.0.1 → peer → ICMP 0% + HTTP 200 through the tunnel). microlink is byte-parity with WiCAN v6 again (the interim mbedtls-3.6 bridges were removed with the v6 move) |
 | imu_manager + i2c_bus (replaces the legacy imu component) | ✅ | SMD/WoM detectors, /api/imu (bench: gravity on Z, die temp), motion dev-status bit, `imu` CLI; ESPNetLink extension imu_manager_wom.c keeps `sleep 4` wake-on-motion working |
+| led_manager (AW2023 RGB status LED on i2c_bus + indication arbitration) | ✅ | Composed 2026-09-16 (byte-identical meatpi-components copy; event_manager glue excluded like imu/vpn). Boot: init after i2c_bus, /api/led registered, started first among the bus peripherals so the settings-defined idle (default solid blue 0,204,255) shows at boot; `led` CLI via its `cli` setting |
 | wifi_modem (WiFi-modem mode: USB-C 5 V only, AP NAPT into the LTE uplink, DNS proxy, per-device AP password, /api/wifi_modem, `wifi_modem` CLI) | ✅ | New 2026-08-22 (ported from the gps-test-sandbox MVP to the standard): init/start/stop, field-table settings `{usb_mode, ap_share, ap_password_provisioned, cli}`, `wifi_modem_settings.c` + `_cli.c` + `_http.c` split, PSRAM static stacks, no panic paths, README with footprint, route map + CLI table updated, 14 host tests + pytest test_app on the main partition table (device-run). Bench-verified over LTE from rpi001 (join → /api/wifi_modem → HTTP/HTTPS/DNS through NAPT) and the zero-touch pairing flow with a PC as the WiCAN over NCM (credentials USB-only, runtime USB cut/restore) |
 | filesystem (FULL WiCAN core, replaces the shim) | ✅ | /data mount on the `storage` littlefs partition (same flash bytes, new VFS prefix), atomic writes, streams/async pipe, path validation, `fs` CLI + {cli} settings, /api/fs file manager. Device-verified: list/info/upload/delete + legacy config.json.imported visible at /data |
 | cert_manager (TLS certificate sets) | ✅ | /data/certs storage (WiCAN-verbatim), /api/certs surface device-verified (upload PEM → list → delete); http_client_manager cert_set TLS path re-enabled (was bundle-only), download() restored |
-| HTTP route docs (components/HTTP_API.md central map) | ✅ | Central map current (settings/system/diag/ota/webhook/wifi/lte/gps/vpn/imu + UI) |
+| HTTP route docs (components/HTTP_API.md central map) | ✅ | Central map current (settings/system/diag/ota/webhook/wifi/lte/gps/vpn/imu/led + UI) |
 
 ## §2 Memory
 
@@ -113,6 +114,7 @@ behavior is bench-verified today; on-target pytest apps are the backlog.
 | api_http | ✅ | api_http_util.c: secret redact/unredact, /api/settings URI parse, level map. Handlers are esp_http_server-bound, verified on device over RNDIS |
 | imu_manager (replaces imu) | ✅ | WiCAN suite: policy state machine + settings migration (host) + on-device /api/imu + `imu` CLI bench-verified. WoM deep-sleep extension is hardware-bound |
 | i2c_bus | — | Thin bus owner (one init + add_device wrapper); exercised by imu_manager on every boot |
+| led_manager | ✅ | WiCAN suite: pure arbitration policy (6 host tests). AW2023 layer is I2C-bound → bench (boot log `led_manager: started (idle solid …)`) |
 | restart_tracker | ✅ | WiCAN suite: pure core (CRC envelope, ring, planned intent, MSPI-guard) — 8 host tests + test_app |
 | ota_manager | ✅ | WiCAN suite: pure session state machine (flash ops injected). HTTP path device-verified end-to-end |
 | mdns_manager | ✅ | WiCAN suite (hostname builders adapted to espnetlink_<id>) |
@@ -143,6 +145,8 @@ behavior is bench-verified today; on-target pytest apps are the backlog.
   only); `download()` = ESP_ERR_NOT_SUPPORTED.
 - `imu_manager`: event_manager glue excluded; ESPNetLink gained
   `imu_manager_wom.c` (`sleep 4` wake-on-motion arm — kept from legacy imu).
+- `led_manager`: event_manager glue excluded (`led.indicate`/`led.clear`
+  rule actions); REST + CLI surfaces unchanged.
 - Ported `*_cli.c` internal `OK` trailers stripped — on this product the
   CDC console owns the OK/ERROR trailer (legacy parity contract).
 - mDNS: `_meatpi._tcp` only (no `_wican._tcp`); esp-mdns rides the WiFi

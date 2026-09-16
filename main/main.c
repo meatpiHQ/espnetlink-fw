@@ -19,6 +19,7 @@
 #include "cert_manager.h"
 #include "i2c_bus.h"
 #include "imu_manager.h"
+#include "led_manager.h"
 #include "vpn_manager.h"
 #include "usb_cli_console.h"
 
@@ -420,9 +421,10 @@ void app_main(void)
     init_step("http_client_manager_init", http_client_manager_init);
     init_step("ha_webhooks_init", ha_webhooks_init);
     init_step("mdns_manager_init", mdns_manager_init);
-    /* the shared I2C bus, then its peripheral manager (both register
-     * their settings/log descriptors inside init) */
+    /* the shared I2C bus, then its peripheral managers (all register
+     * their settings/log descriptors inside init; no bus traffic yet) */
     init_step("i2c_bus_init", i2c_bus_init);
+    init_step("led_manager_init", led_manager_init);
     init_step("imu_manager_init", imu_manager_init);
     init_step("vpn_manager_init", vpn_manager_init);
     init_step("filesystem_register_settings", filesystem_register_settings);
@@ -447,6 +449,7 @@ void app_main(void)
     init_step("lte_register_http", lte_upstream_pppos_register_http);
     init_step("gps_register_http", gps_register_http);
     init_step("wifi_modem_register_http", wifi_modem_register_http);
+    init_step("led_manager_register_http", led_manager_register_http);
     init_step("imu_manager_register_http", imu_manager_register_http);
     init_step("vpn_manager_register_http", vpn_manager_register_http);
     init_step("cert_manager_register_http", cert_manager_register_http);
@@ -598,6 +601,9 @@ void app_main(void)
     start_component("filesystem", filesystem_start);
     start_component("cert_manager", cert_manager_start);
     start_component("i2c_bus", i2c_bus_start);
+    /* LED first among the bus peripherals: the settings-defined idle
+     * indication (default solid blue) is visible as early as possible */
+    start_component("led_manager", led_manager_start);
     start_component("imu_manager", imu_manager_start);
     start_component("wifi_manager", wifi_manager_start);
     start_component("wifi_modem", wifi_modem_start);

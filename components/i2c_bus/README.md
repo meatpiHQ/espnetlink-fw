@@ -2,8 +2,9 @@
 
 Owns THE one I2C master bus (`i2c_master` driver) that the on-board
 peripherals share. On ESPNetLink that is the ICM-42670 IMU
-(`imu_manager`, 0x68); WiCAN Pro adds the AW2023 LED controller
-(`led_manager`, 0x45) and the RX8130 RTC (`rtc_manager`, 0x32).
+(`imu_manager`, 0x68) and the AW2023 RGB LED controller
+(`led_manager`, 0x45 - composed 2026-09-16, chip ID 0x09 on the bench);
+WiCAN Pro adds the RX8130 RTC (`rtc_manager`, 0x32).
 Managers attach devices; nobody else creates a bus.
 Pins are Kconfig (ESPNetLink: `WICAN_I2C_SDA_GPIO`=48,
 `WICAN_I2C_SCL_GPIO`=47) so a

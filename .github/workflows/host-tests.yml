@@ -32,6 +32,7 @@ jobs:
           - components/mdns_manager/host_test
           - components/http_client_manager/host_test
           - components/imu_manager/host_test
+          - components/led_manager/host_test
           - components/vpn_manager/host_test
           - components/filesystem/host_test
           - components/cert_manager/host_test

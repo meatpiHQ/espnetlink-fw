@@ -64,13 +64,14 @@ exist as far as the product is concerned.
 | `/api/wifi_modem/usb_data` | POST | wifi_modem — `{"enabled":bool}` runtime USB data cut/restore at the mux (applied 500 ms after the answer); 409 when `usb_mode=ncm`. Also records the owner's intent: a cut arms the `boot_cut` hint (next boots cut at ~3 s, 60 s no-AP-client self-restore), a restore clears it |
 | `/api/vpn`, `/api/vpn/keygen` | GET / POST | vpn_manager |
 | `/api/imu` | GET | imu_manager |
+| `/api/led` | GET, PUT, DELETE | led_manager (led_manager/README.md) — GET = the arbiter’s current indication (priority/mode/rgb); PUT/DELETE drive the ALERT slot (the user slot, same as `led -c`). Idle/boot color via `/api/settings/led_manager` |
 | `/` + UI assets | GET | web_ui (gzip asset table) |
 
 Registered settings components (each answers under `/api/settings/<name>`):
 `log_manager`, `dev_status_manager`, `wifi_manager`, `cmdline_manager`,
 `lte_upstream_pppos`, `gps`, `system`, `usb_cli_console`,
 `restart_tracker`, `ha_webhooks`, `mdns_manager`, `vpn_manager`,
-`imu_manager`, `filesystem`, `wifi_modem`.
+`imu_manager`, `led_manager`, `filesystem`, `wifi_modem`.
 
 ## Home Assistant device contract (components/device-contract/)
 
