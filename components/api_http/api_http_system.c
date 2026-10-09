@@ -21,8 +21,9 @@
 static const char *TAG = "api_http";
 
 /* device-contract v2: the control-API level GET /api/info reports.
- * Bump when the /api surface changes incompatibly. */
-#define API_INFO_API_LEVEL 7
+ * Bump when the /api surface changes incompatibly. 8 (2026-10-07): the
+ * SIM state and the bring-up stage on /api/lte and in the health. */
+#define API_INFO_API_LEVEL 8
 
 /* ---- GET /api/status ----------------------------------------------------------- */
 

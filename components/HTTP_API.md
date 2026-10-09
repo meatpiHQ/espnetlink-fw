@@ -38,7 +38,7 @@ exist as far as the product is concerned.
 | `/api/settings/factory_reset` | POST | api_http (requires `{"confirm":"factory-reset"}`) |
 | `/api/status` | GET | api_http (dev_status_manager/HTTP_API.md) — bits, uptime, version, partition, boot counters, memory, temp — the HA "V6 detection" route |
 | `/api/status/tasks` | GET | api_http — task monitor (JSON) |
-| `/api/info` | GET | api_http — device identity (device_type/model/hw/fw/device_id/mac/api_level). `api_level` 7 (2026-09-08) = the WiFi-modem surface: `/api/wifi_modem*`, the runtime `usb_dev_ethernet.class`; the WiCAN's `espnetlink_link` expects >= 7 and shows the level in its status (a July test build reporting 6 with none of those routes passed as an "ESPNetLink" for a whole field trip) |
+| `/api/info` | GET | api_http: device identity (device_type/model/hw/fw/device_id/mac/api_level). `api_level` 7 (2026-09-08) = the WiFi-modem surface: `/api/wifi_modem*`, the runtime `usb_dev_ethernet.class`; the WiCAN's `espnetlink_link` expects >= 7 and shows the level in its status (a July test build reporting 6 with none of those routes passed as an "ESPNetLink" for a whole field trip). 8 (2026-10-07) = `sim` and `stage` on `/api/lte` and in the health's `lte` (additive; a 7 reads as `sim` unknown on the WiCAN) |
 | `/api/restart` | POST | api_http (restart_tracker/HTTP_API.md) |
 | `/api/restart/history` | GET | api_http — retained boot forensics |
 | `/api/logs/ring` | GET, DELETE | api_http (log_manager/HTTP_API.md) — text/plain crash ring |
@@ -57,9 +57,9 @@ exist as far as the product is concerned.
 | `/api/certs/upload` | POST | cert_manager — multipart fields or raw PEM `?set=&type=` |
 | `/api/wifi/status` | GET | wifi_manager (wifi_manager/HTTP_API.md) |
 | `/api/wifi/scan` | GET | wifi_manager |
-| `/api/lte` | GET | lte_upstream_pppos — uplink status (web UI status page) |
+| `/api/lte` | GET | lte_upstream_pppos: uplink status (web UI status page). `{"valid","sim":"unknown\|ready\|missing\|pin","stage":"not_started\|connecting\|connected\|ppp_disconnected\|network_detached"}` always (the SIM as the bring-up found it: AT+CIMI within 30 s = ready, else the PIN read tells `pin` from `missing`; the stage from the PPP event bits, the `lte -j` console spelling); with `valid` also `connected`, `attached`, `rssi_dbm` (absent while unknown), `operator`, `network_type`, `ip` (while connected). `sim`/`stage` since api_level 8 (2026-10-07, the WiCAN's Quick Setup checks) |
 | `/api/gps` | GET | gps — fix snapshot (web UI status page) |
-| `/api/wifi_modem` | GET | wifi_modem (wifi_modem/README.md) — WiFi-modem health document for the WiCAN poller: usb_mode, usb_data, boot_cut (the boot-cut hint, 2026-08-24), NAPT, AP, LTE + GPS summary (no secrets) |
+| `/api/wifi_modem` | GET | wifi_modem (wifi_modem/README.md): WiFi-modem health document for the WiCAN poller: usb_mode, usb_data, boot_cut (the boot-cut hint, 2026-08-24), NAPT, AP, LTE + GPS summary (no secrets). `lte` carries `sim` and `stage` before its first poll and `ip` while connected (api_level 8, 2026-10-07) |
 | `/api/wifi_modem/credentials` | GET | wifi_modem — AP `{ssid,password,device_id}`; **403 unless the request arrived over a non-WiFi interface (USB)** — the WiCAN pairing channel |
 | `/api/wifi_modem/usb_data` | POST | wifi_modem — `{"enabled":bool}` runtime USB data cut/restore at the mux (applied 500 ms after the answer); 409 when `usb_mode=ncm`. Also records the owner's intent: a cut arms the `boot_cut` hint (next boots cut at ~3 s, 60 s no-AP-client self-restore), a restore clears it |
 | `/api/vpn`, `/api/vpn/keygen` | GET / POST | vpn_manager |
