@@ -155,6 +155,12 @@ static void add_lte(cJSON *o)
     bool valid = (lte_upstream_pppos_get_status(&st) == ESP_OK && st.valid);
 
     cJSON_AddBoolToObject(lte, "valid", valid);
+    /* the SIM and the stage are there before the monitor's first poll: a
+     * dongle with no SIM has them and nothing else (2026-10-07, the
+     * WiCAN's Quick Setup checks read them over the cable while pairing) */
+    cJSON_AddStringToObject(lte, "sim", lte_upstream_pppos_sim_str(
+                                            lte_upstream_pppos_sim_state()));
+    cJSON_AddStringToObject(lte, "stage", lte_upstream_pppos_stage_str());
     if (!valid)
     {
         return;
@@ -173,6 +179,17 @@ static void add_lte(cJSON *o)
     if (st.network_type[0] != '\0')
     {
         cJSON_AddStringToObject(lte, "network_type", st.network_type);
+    }
+    if (st.ppp_connected && st.current_ip.addr != 0)
+    {
+        char ip[16];
+
+        snprintf(ip, sizeof(ip), "%u.%u.%u.%u",
+                 (unsigned)(st.current_ip.addr & 0xff),
+                 (unsigned)((st.current_ip.addr >> 8) & 0xff),
+                 (unsigned)((st.current_ip.addr >> 16) & 0xff),
+                 (unsigned)((st.current_ip.addr >> 24) & 0xff));
+        cJSON_AddStringToObject(lte, "ip", ip);
     }
 }
 

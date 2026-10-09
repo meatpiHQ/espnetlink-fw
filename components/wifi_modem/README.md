@@ -116,15 +116,19 @@ poller (no secrets):
 ```json
 {"usb_mode":"power_only","ap_share":true,"napt":true,
  "ap":{"ssid":"ESPNetLink_894A5D","ip":"192.168.80.1","started":true,"clients":1},
- "lte":{"valid":true,"attached":true,"connected":true,"rssi_dbm":-51,
-        "operator":"ALDI Mobile","network_type":"eMTC"},
+ "lte":{"valid":true,"sim":"ready","stage":"connected","attached":true,
+        "connected":true,"rssi_dbm":-51,"operator":"ALDI Mobile",
+        "network_type":"eMTC","ip":"10.86.12.44"},
  "gps":{"valid":true,"fix":true,"satellites":23,"age_ms":321},
  "uptime_s":162,"device_id":"206ef1894a5d"}
 ```
 
-`usb_data` is the live state of the data lines. `lte` carries only
-`valid:false` until the monitor has polled once; `rssi_dbm`/`operator`/
-`network_type` appear when known. The full fix is `GET /api/gps`; settings
+`usb_data` is the live state of the data lines. `lte` carries `valid:false`
+plus `sim` and `stage` until the monitor has polled once (2026-10-07: the
+SIM as the bring-up found it, "unknown" / "ready" / "missing" / "pin", and
+the bring-up stage in the `lte -j` spelling, so a WiCAN reading this over the
+cable while pairing can say "SIM not found" before any attach);
+`rssi_dbm`/`operator`/`network_type` appear when known, `ip` while connected. The full fix is `GET /api/gps`; settings
 are `GET/PUT /api/settings/wifi_modem`.
 
 `GET /api/wifi_modem/credentials` → `{"ssid","password","device_id",
