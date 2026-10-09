@@ -86,6 +86,33 @@ esp_err_t lte_upstream_pppos_stop(void);
 // Returns ESP_ERR_INVALID_STATE if the monitor has not yet run.
 esp_err_t lte_upstream_pppos_get_status(lte_status_t *out);
 
+/* The SIM as the bring-up found it (2026-10-07, for the WiCAN's Quick
+ * Setup checks: "SIM found / not found / PIN locked" before any attach).
+ * Learned once per start from the SIM-ready wait (AT+CIMI) and the PIN
+ * read; survives a failed attach, so a dongle with no SIM says so instead
+ * of an empty status. */
+typedef enum
+{
+    LTE_SIM_UNKNOWN = 0,   /* not looked yet (modem still starting)     */
+    LTE_SIM_READY,         /* IMSI readable                             */
+    LTE_SIM_MISSING,       /* no IMSI within the wait: absent or dead   */
+    LTE_SIM_PIN,           /* the SIM wants a PIN this config lacks     */
+} lte_sim_state_t;
+
+lte_sim_state_t lte_upstream_pppos_sim_state(void);
+
+/** "unknown" | "ready" | "missing" | "pin": the wire spelling (pure). */
+const char *lte_upstream_pppos_sim_str(lte_sim_state_t s);
+
+/** The bring-up stage as one word (pure; the `lte -j` console spelling):
+ *  "not_started" | "connecting" | "connected" | "ppp_disconnected" |
+ *  "network_detached". */
+const char *lte_upstream_pppos_stage_from(bool started, bool connected,
+                                          bool disconnected, bool detached);
+
+/** The current stage from the live event bits (never NULL). */
+const char *lte_upstream_pppos_stage_str(void);
+
 /**
  * Send a raw AT command to the modem and return the response.
  *

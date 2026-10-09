@@ -50,6 +50,10 @@ extern lte_upstream_pppos_config_t s_saved_cfg;
 esp_err_t lte_inner_start(const lte_upstream_pppos_config_t *cfg);
 void lte_inner_stop(void);
 
+/* lte_upstream_pppos.c: what the bring-up learned about the SIM (the
+ * attach wait in _at.c reports it; GET /api/lte and the health show it) */
+void lte_sim_note(lte_sim_state_t s);
+
 /* lte_upstream_pppos_at.c: SIM readiness + attach/registration wait */
 esp_err_t wait_for_cellular_attach(esp_modem_dce_t *dce, uint32_t timeout_ms,
                                    const char *pin,

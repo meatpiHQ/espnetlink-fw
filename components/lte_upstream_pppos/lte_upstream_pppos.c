@@ -49,6 +49,9 @@ TaskHandle_t s_monitor_task;
 
 portMUX_TYPE s_status_mux = portMUX_INITIALIZER_UNLOCKED;
 lte_status_t s_status;   /* protected by s_status_mux */
+/* the SIM as the last bring-up found it; survives a failed attach (the
+ * status struct is zeroed on stop, this is what "no SIM" has to show) */
+static volatile lte_sim_state_t s_sim_state = LTE_SIM_UNKNOWN;
 
 /* --- reconnect supervisor --- */
 TaskHandle_t s_supervisor_task = NULL;
@@ -309,6 +312,7 @@ esp_err_t lte_inner_start(const lte_upstream_pppos_config_t *cfg)
     }
 
     s_enable_usb_share = cfg->enable_usb_ncm_sharing;
+    s_sim_state = LTE_SIM_UNKNOWN;   /* learned again by this bring-up */
 
     ESP_LOGI(TAG, "PPPoS start: apn='%s' hwfc=%s baud=%d share_usb=%s", cfg->apn,
              cfg->hw_flow_control ? "on" : "off",
@@ -689,6 +693,43 @@ esp_err_t lte_upstream_pppos_get_status(lte_status_t *out)
 
     return valid ? ESP_OK : ESP_ERR_INVALID_STATE;
 #endif
+}
+
+#if CONFIG_PPP_SUPPORT
+void lte_sim_note(lte_sim_state_t s)
+{
+    if (s != s_sim_state)
+    {
+        ESP_LOGI(TAG, "SIM: %s", lte_upstream_pppos_sim_str(s));
+    }
+    s_sim_state = s;
+}
+#endif
+
+lte_sim_state_t lte_upstream_pppos_sim_state(void)
+{
+#if !CONFIG_PPP_SUPPORT
+    return LTE_SIM_UNKNOWN;
+#else
+    return s_sim_state;
+#endif
+}
+
+const char *lte_upstream_pppos_stage_str(void)
+{
+    EventGroupHandle_t evt = s_evt;
+
+    if (evt == NULL)
+    {
+        return lte_upstream_pppos_stage_from(false, false, false, false);
+    }
+
+    EventBits_t bits = xEventGroupGetBits(evt);
+
+    return lte_upstream_pppos_stage_from(true,
+                                         (bits & BIT_CONNECTED) != 0,
+                                         (bits & BIT_DISCONNECTED) != 0,
+                                         (bits & BIT_NETWORK_DETACHED) != 0);
 }
 
 bool lte_upstream_pppos_is_time_synced(void)

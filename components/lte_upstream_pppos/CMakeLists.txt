@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "lte_upstream_pppos.c"
+    SRCS "lte_upstream_pppos_status.c" "lte_upstream_pppos.c"
          "lte_upstream_pppos_cli.c"
          "lte_upstream_pppos_monitor.c"
          "lte_upstream_pppos_at.c"

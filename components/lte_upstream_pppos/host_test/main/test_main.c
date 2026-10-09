@@ -181,6 +181,30 @@ void test_cli_gate_off_after_reboot(void)
     TEST_ASSERT_EQUAL(0, s_cli_registrations);
 }
 
+/* The wire spellings GET /api/lte, the health and `lte -j` share
+ * (2026-10-07): every SIM state has a word, anything else is "unknown". */
+void test_sim_state_spellings(void)
+{
+    TEST_ASSERT_EQUAL_STRING("unknown", lte_upstream_pppos_sim_str(LTE_SIM_UNKNOWN));
+    TEST_ASSERT_EQUAL_STRING("ready", lte_upstream_pppos_sim_str(LTE_SIM_READY));
+    TEST_ASSERT_EQUAL_STRING("missing", lte_upstream_pppos_sim_str(LTE_SIM_MISSING));
+    TEST_ASSERT_EQUAL_STRING("pin", lte_upstream_pppos_sim_str(LTE_SIM_PIN));
+    TEST_ASSERT_EQUAL_STRING("unknown", lte_upstream_pppos_sim_str((lte_sim_state_t)99));
+}
+
+/* The stage from the event bits, as the console always spelled it: not
+ * started before the event group exists; connected wins unless the PPP
+ * dropped; a drop beats a detach; otherwise it is still connecting. */
+void test_stage_from_bits(void)
+{
+    TEST_ASSERT_EQUAL_STRING("not_started", lte_upstream_pppos_stage_from(false, true, false, false));
+    TEST_ASSERT_EQUAL_STRING("connecting", lte_upstream_pppos_stage_from(true, false, false, false));
+    TEST_ASSERT_EQUAL_STRING("connected", lte_upstream_pppos_stage_from(true, true, false, false));
+    TEST_ASSERT_EQUAL_STRING("ppp_disconnected", lte_upstream_pppos_stage_from(true, true, true, false));
+    TEST_ASSERT_EQUAL_STRING("ppp_disconnected", lte_upstream_pppos_stage_from(true, false, true, true));
+    TEST_ASSERT_EQUAL_STRING("network_detached", lte_upstream_pppos_stage_from(true, false, false, true));
+}
+
 void app_main(void)
 {
     UNITY_BEGIN();
@@ -189,6 +213,8 @@ void app_main(void)
     RUN_TEST(test_apn_persist_is_reboot_to_apply);
     RUN_TEST(test_apn_length_limit_enforced);
     RUN_TEST(test_cli_gate_off_after_reboot);
+    RUN_TEST(test_sim_state_spellings);
+    RUN_TEST(test_stage_from_bits);
 
     exit(UNITY_END()); /* the CI verdict is this process's exit code */
 }

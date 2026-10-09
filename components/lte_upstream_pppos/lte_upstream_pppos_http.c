@@ -28,6 +28,11 @@ static esp_err_t lte_get_handler(httpd_req_t *req)
     bool valid = (lte_upstream_pppos_get_status(&st) == ESP_OK && st.valid);
 
     cJSON_AddBoolToObject(o, "valid", valid);
+    /* before any attach: the SIM as the bring-up found it and the stage,
+     * so a dongle with no SIM says so (2026-10-07, the WiCAN's checks) */
+    cJSON_AddStringToObject(o, "sim", lte_upstream_pppos_sim_str(
+                                          lte_upstream_pppos_sim_state()));
+    cJSON_AddStringToObject(o, "stage", lte_upstream_pppos_stage_str());
 
     if (valid)
     {

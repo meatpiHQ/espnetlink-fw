@@ -63,8 +63,19 @@ esp_err_t wait_for_cellular_attach(esp_modem_dce_t *dce, uint32_t timeout_ms,
      * registration.  Allow up to 30 s; deduct the wait from the overall
      * registration deadline so we don't extend the total timeout. */
     const int64_t t_start = esp_timer_get_time() / 1000;
-    wait_for_sim_ready(dce, 30000);
+    const bool sim_ready = wait_for_sim_ready(dce, 30000) == ESP_OK;
     const uint32_t sim_wait_elapsed = (uint32_t)(esp_timer_get_time() / 1000 - t_start);
+
+    /* what the SIM check found, for the status surfaces (a locked SIM
+     * answers AT+CPIN? but no AT+CIMI: the PIN read below tells it from a
+     * missing one) */
+    bool pin_ok = true;
+    const bool pin_known = esp_modem_read_pin(dce, &pin_ok) == ESP_OK;
+
+    lte_sim_note(sim_ready ? LTE_SIM_READY
+                           : (pin_known && !pin_ok) ? LTE_SIM_PIN
+                                                    : LTE_SIM_MISSING);
+
     if (sim_wait_elapsed < timeout_ms)
     {
         timeout_ms -= sim_wait_elapsed;
@@ -75,8 +86,7 @@ esp_err_t wait_for_cellular_attach(esp_modem_dce_t *dce, uint32_t timeout_ms,
     }
 
     const int64_t deadline = esp_timer_get_time() / 1000 + timeout_ms;
-    bool pin_ok = true;
-    if (esp_modem_read_pin(dce, &pin_ok) == ESP_OK && !pin_ok)
+    if (pin_known && !pin_ok)
     {
         if (pin && pin[0] != '\0')
         {
@@ -89,6 +99,7 @@ esp_err_t wait_for_cellular_attach(esp_modem_dce_t *dce, uint32_t timeout_ms,
             }
             /* Give the modem a moment to verify the PIN and unlock */
             vTaskDelay(pdMS_TO_TICKS(3000));
+            lte_sim_note(LTE_SIM_READY);
         }
         else
         {

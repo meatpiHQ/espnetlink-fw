@@ -126,23 +126,12 @@ static int cmd_lte(int argc, char **argv)
             return 1;
         }
 
-        /* --- stage / state --- */
-        const char *stage = "not_started";
-        bool has_ip = false;
-        if (s_evt)
-        {
-            EventBits_t bits = xEventGroupGetBits(s_evt);
-            has_ip = (bits & BIT_CONNECTED) && !(bits & BIT_DISCONNECTED);
-            if (has_ip)
-                stage = "connected";
-            else if (bits & BIT_DISCONNECTED)
-                stage = "ppp_disconnected";
-            else if (bits & BIT_NETWORK_DETACHED)
-                stage = "network_detached";
-            else
-                stage = "connecting";
-        }
-        cJSON_AddStringToObject(root, "stage", stage);
+        /* --- stage / state (the one spelling GET /api/lte uses too) --- */
+        cJSON_AddStringToObject(root, "stage", lte_upstream_pppos_stage_str());
+        /* the SIM as the bring-up found it (sim_status below is the live
+         * AT+CPIN? answer; this one is also there without a console) */
+        cJSON_AddStringToObject(root, "sim", lte_upstream_pppos_sim_str(
+                                                 lte_upstream_pppos_sim_state()));
 
         /* --- cached monitor status (may be all-zero if monitor hasn't run) --- */
         cJSON_AddBoolToObject(root, "status_valid", st.valid);

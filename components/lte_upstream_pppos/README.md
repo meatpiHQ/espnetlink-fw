@@ -19,8 +19,10 @@ Types:
 Operation:
 
 - `lte_upstream_pppos_wait_for_ip(timeout_ms)` — block until PPP GOT_IP.
-- `lte_upstream_pppos_get_status(out)` — thread-safe status snapshot (spinlock-protected).
-- `lte_upstream_pppos_send_at(cmd, resp, resp_len, timeout_ms)` — raw AT command (requires CMUX).
+- `lte_upstream_pppos_get_status(out)`: thread-safe status snapshot (spinlock-protected).
+- `lte_upstream_pppos_sim_state(void)` / `lte_upstream_pppos_sim_str(s)` (2026-10-07): the SIM as the last bring-up found it (`LTE_SIM_UNKNOWN` / `READY` / `MISSING` / `PIN`; the AT+CIMI wait says ready, the PIN read tells pin from missing) and its wire spelling ("unknown" / "ready" / "missing" / "pin"). Kept outside the status struct, so it survives the failed attach a missing SIM causes: `GET /api/lte`, the `/api/wifi_modem` health and `lte -j` show it before any attach (the WiCAN's Quick Setup reads it over the cable while pairing).
+- `lte_upstream_pppos_stage_from(started, connected, disconnected, detached)` / `lte_upstream_pppos_stage_str(void)`: the bring-up stage in the `lte -j` spelling ("not_started" / "connecting" / "connected" / "ppp_disconnected" / "network_detached"), pure from the bits and live from the event group; one source for the console and both HTTP documents (`lte_upstream_pppos_status.c`, host-tested).
+- `lte_upstream_pppos_send_at(cmd, resp, resp_len, timeout_ms)`: raw AT command (requires CMUX).
 - `lte_upstream_pppos_is_time_synced(void)` / `lte_upstream_pppos_mark_time_synced(void)` — modem time-sync state.
 - `lte_pppos_usb_create_dce(dte_cfg, dce_cfg, netif, sel_gpio, sel_level, vid, pid, iface, timeout)` (`lte_upstream_pppos_usb.h`) — esp_modem DCE on the BG95 USB CDC-ACM port; defaults `LTE_USB_VID_QUECTEL` 0x2C7C / `LTE_USB_PID_BG95` 0x0095 / `LTE_USB_IFACE_MODEM` 2.
 
