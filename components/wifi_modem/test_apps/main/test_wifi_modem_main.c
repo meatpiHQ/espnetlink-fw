@@ -6,7 +6,8 @@
  *        pytest_wifi_modem.py expects in order. No LTE or client is needed:
  *        it exercises boot-apply, the per-device AP password provisioning,
  *        NAPT/DNS-proxy arming on the real AP netif, stop, reboot-to-apply
- *        of power_only, and the mux drive/readback on the real USB_SEL pins.
+ *        of console mode, and the mux drive/readback on the real USB_SEL
+ *        pins (the DIP route at boot in every mode since 2026-10-12).
  *
  * NOTE: starts from a wiped settings partition (settings_manager_factory_
  * reset before the boot pass) so the provisioning path is deterministic —
@@ -49,11 +50,11 @@ static void print_settings(const char *tag)
 {
     const wifi_modem_settings_t *cfg = wifi_modem_settings_config();
 
-    printf("%s usb_mode=%s ap_share=%d provisioned=%d cli=%d usbdata=%d\n", tag,
+    printf("%s usb_mode=%s ap_share=%d provisioned=%d cli=%d usbeth=%d\n", tag,
            cfg->usb_mode == WIFI_MODEM_USB_AUTO ? "auto"
-           : cfg->usb_mode == WIFI_MODEM_USB_NCM ? "ncm" : "power_only",
+           : cfg->usb_mode == WIFI_MODEM_USB_NCM ? "ncm" : "console",
            cfg->ap_share, cfg->ap_password_provisioned, cfg->cli,
-           wifi_modem_usb_data_enabled());
+           wifi_modem_usb_ethernet_enabled());
 }
 
 void app_main(void)
@@ -83,10 +84,10 @@ void app_main(void)
     /* unconfigured component refuses start / provisioning (§4.3 step 5) */
     bool reboot = true;
 
-    printf("UNCONFIGURED start=%s provision=%s usbdata=%d\n",
+    printf("UNCONFIGURED start=%s provision=%s usbeth=%d\n",
            esp_err_to_name(wifi_modem_start()),
            esp_err_to_name(wifi_modem_provision(&reboot)),
-           wifi_modem_usb_data_enabled());
+           wifi_modem_usb_ethernet_enabled());
 
     ESP_ERROR_CHECK(settings_manager_start()); /* the ONE boot apply pass */
     print_settings("SETTINGS");
@@ -155,10 +156,10 @@ void app_main(void)
     err = wifi_modem_stop();
     printf("STOP ok=%d napt=%d\n", err == ESP_OK, wifi_modem_napt_active());
 
-    /* ---- reboot-to-apply: power_only ------------------------------------ */
-    err = wifi_modem_settings_persist_str("usb_mode", "power_only");
-    printf("SET ok=%d usbdata_now=%d\n", err == ESP_OK,
-           wifi_modem_usb_data_enabled());
+    /* ---- reboot-to-apply: console --------------------------------------- */
+    err = wifi_modem_settings_persist_str("usb_mode", "console");
+    printf("SET ok=%d usbeth_now=%d\n", err == ESP_OK,
+           wifi_modem_usb_ethernet_enabled());
 
     /* simulated reboot of the settings layer */
     settings_manager_stop();
@@ -166,10 +167,16 @@ void app_main(void)
     ESP_ERROR_CHECK(settings_manager_start());
     print_settings("REBOOT");
 
-    /* ---- the mux drive on the real pins -------------------------------- */
+    /* ---- the boot route on the real pins: the DIP route in EVERY mode
+     * (2026-10-12: no boot-time cut any more), then re-cut for the same
+     * reason as above (this app owns no OTG stack) ---------------------- */
     err = wifi_modem_apply_usb_route();
-    printf("ROUTE power_only ok=%d sel1=%d sel2=%d\n", err == ESP_OK,
-           gpio_get_level(USB_SEL_1), gpio_get_level(USB_SEL_2));
+    printf("ROUTE console ok=%d routed=%d sel1=%d sel2=%d\n", err == ESP_OK,
+           wifi_modem_usb_data_routed(), gpio_get_level(USB_SEL_1),
+           gpio_get_level(USB_SEL_2));
+    err = wifi_modem_usb_data_set(false);
+    printf("USBDATA recut2 ok=%d routed=%d sel2=%d\n", err == ESP_OK,
+           wifi_modem_usb_data_routed(), gpio_get_level(USB_SEL_2));
 
     /* usb_mode=ncm locks the runtime switch */
     ESP_ERROR_CHECK(wifi_modem_settings_persist_str("usb_mode", "ncm"));

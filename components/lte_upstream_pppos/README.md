@@ -49,7 +49,7 @@ Descriptor `"lte_upstream_pppos"`, version 1 (`lte_upstream_pppos_settings.c`):
 | `apn_user` | str ≤32 | `""` | APN username |
 | `apn_password` | str ≤32 | `""` | APN password |
 | `apn_pin` | str ≤8 | `""` | SIM PIN (empty = no PIN lock) |
-| `ncm_share` | bool | `false` | share the uplink over USB NCM (NAT + DNS + default-router offer). Off since the WiFi-modem mode: USB is a control/pairing channel, internet comes over the AP; on, a PC's default route moves onto the LTE link |
+| `ncm_share` | bool | `true` | share the uplink over the USB Ethernet link (NAT + DNS + default-router offer). On by default again since 2026-10-12: the dongle starts as a USB LTE modem and the WiCAN pairs in usb_rndis mode by default, so a matching default spares the dongle restart at the first contact; a PC on the cable gets its default route over LTE with it (turn it off per device to keep USB a control channel). It was off from 2026-08-23 to 2026-10-12 |
 | `cli` | bool | `true` | register the `lte` console command (§6b) |
 
 ## Memory footprint (estimated)

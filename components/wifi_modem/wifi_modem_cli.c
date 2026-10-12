@@ -5,14 +5,16 @@
  *        the `cli` setting.
  *
  *   wifi_modem                     status summary (one line)
- *   wifi_modem -k                  AP credentials (SSID + password) — the
+ *   wifi_modem -k                  AP credentials (SSID + password): the
  *                                  only place the per-device password is
  *                                  ever printed; console surfaces need
- *                                  physical/USB access
- *   wifi_modem -u auto|ncm|power_only  persist usb_mode (reboot to apply)
+ *                                  physical/USB access. With usb_mode=console
+ *                                  this is the owner's way back in.
+ *   wifi_modem -u auto|ncm|console persist usb_mode (reboot to apply)
  *   wifi_modem -a 0|1              persist ap_share (reboot to apply)
  *   wifi_modem -d 0|1              runtime USB data cut / restore (what the
- *                                  WiCAN does over HTTP; bench + diagnosis)
+ *                                  WiCAN does over HTTP; bench + diagnosis;
+ *                                  lasts until the next boot)
  */
 #include "wifi_modem.h"
 
@@ -51,11 +53,12 @@ static void print_status(void)
         (void)wmc_format_ipv4(wifi_modem_upstream_dns(), dns, sizeof(dns));
     }
 
-    cmdline_printf("usb_mode=%s usb_data=%d boot_cut=%d ap_share=%d napt=%d "
-                   "ap_ip=%s clients=%u upstream_dns=%s mux SEL1=%d SEL2=%d\n",
+    cmdline_printf("usb_mode=%s usb_data=%d usb_ethernet=%d ap_share=%d "
+                   "napt=%d ap_ip=%s clients=%u upstream_dns=%s mux SEL1=%d "
+                   "SEL2=%d\n",
                    wmc_usb_mode_str(cfg->usb_mode),
                    (int)wifi_modem_usb_data_routed(),
-                   (int)wifi_modem_boot_cut_hint(), (int)cfg->ap_share,
+                   (int)wifi_modem_usb_ethernet_enabled(), (int)cfg->ap_share,
                    (int)wifi_modem_napt_active(), ap_ip,
                    (unsigned)wifi_manager_get_ap_station_count(), dns,
                    gpio_get_level(USB_SEL_1), gpio_get_level(USB_SEL_2));
@@ -82,7 +85,7 @@ static int cmd_wifi_modem(int argc, char **argv)
 
     if (nerrors != 0)
     {
-        cmdline_printf("usage: wifi_modem [-k] [-u auto|ncm|power_only] "
+        cmdline_printf("usage: wifi_modem [-k] [-u auto|ncm|console] "
                        "[-a 0|1] [-d 0|1]\n");
         return 1;
     }
@@ -92,12 +95,6 @@ static int cmd_wifi_modem(int argc, char **argv)
         bool on = s_args.data->ival[0] != 0;
         esp_err_t err = wifi_modem_usb_data_set(on);
 
-        if (err == ESP_OK)
-        {
-            /* the console is the owner's intent, like the HTTP path:
-             * a cut arms the boot-cut hint, a restore clears it */
-            wifi_modem_hint_note(on);
-        }
         cmdline_printf("usb_data=%d %s (SEL1=%d SEL2=%d)\n",
                        (int)wifi_modem_usb_data_routed(),
                        err == ESP_OK ? "ok" : esp_err_to_name(err),
@@ -111,7 +108,7 @@ static int cmd_wifi_modem(int argc, char **argv)
 
         if (!wmc_usb_mode_parse(s_args.usb->sval[0], &mode))
         {
-            cmdline_printf("usage: wifi_modem -u auto|ncm|power_only\n");
+            cmdline_printf("usage: wifi_modem -u auto|ncm|console\n");
             return 1;
         }
 
@@ -150,7 +147,7 @@ esp_err_t wifi_modem_register_cli(void)
         .command = "wifi_modem",
         .help = "WiFi-modem mode: status, AP credentials, usb_mode/ap_share "
                 "(reboot to apply), runtime USB data cut",
-        .hint = "Options: -k/--key, -u/--usb auto|ncm|power_only, "
+        .hint = "Options: -k/--key, -u/--usb auto|ncm|console, "
                 "-a/--share 0|1, -d/--data 0|1",
         .func = cmd_wifi_modem,
         .argtable = &s_args,
@@ -158,7 +155,7 @@ esp_err_t wifi_modem_register_cli(void)
 
     s_args.key = arg_lit0("k", "key", "Print the AP SSID and password");
     s_args.usb = arg_str0("u", "usb", "<mode>",
-                          "Persist usb_mode: auto | ncm | power_only");
+                          "Persist usb_mode: auto | ncm | console");
     s_args.share = arg_int0("a", "share", "<0|1>", "Persist ap_share");
     s_args.data = arg_int0("d", "data", "<0|1>",
                            "Runtime USB data lines: 0 = cut, 1 = restore");

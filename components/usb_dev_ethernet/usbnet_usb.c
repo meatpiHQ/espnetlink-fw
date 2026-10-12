@@ -59,8 +59,11 @@ static const char *TAG = "usb_dev_ethernet";
 #define USB_CONFIG_SIZE_NCM_CDC   (9 + CDC_NCM_ALT_DESCRIPTOR_LEN + CDC_ACM_DESCRIPTOR_LEN)
 #define USB_CONFIG_SIZE_RNDIS     (9 + CDC_RNDIS_DESCRIPTOR_LEN)
 #define USB_CONFIG_SIZE_RNDIS_CDC (9 + CDC_RNDIS_DESCRIPTOR_LEN + CDC_ACM_DESCRIPTOR_LEN)
+#define USB_CONFIG_SIZE_CDC_ONLY  (9 + CDC_ACM_DESCRIPTOR_LEN)
 
 static bool s_console_enabled = false;
+/* false = the console alone (wifi_modem usb_mode=console, 2026-10-12) */
+static bool s_ethernet_enabled = true;
 
 // Both ECM and RNDIS are 2-interface functions (control+data)
 static struct usbd_interface s_eth_intf0;
@@ -109,6 +112,14 @@ static const uint8_t s_config_descriptor_rndis_cdc[] = {
     CDC_ACM_DESCRIPTOR_INIT(0x02, 0x84, 0x04, 0x82, CDC_MAX_MPS, USB_STRING_CONSOLE_INTF_INDEX),
 };
 
+/* The CDC-ACM console ALONE: interfaces 0 and 1 (CherryUSB numbers
+ * interfaces in registration order, and the console is the only function
+ * registered then), the console's own endpoints, no Ethernet function. */
+static const uint8_t s_config_descriptor_cdc_only[] = {
+    USB_CONFIG_DESCRIPTOR_INIT(USB_CONFIG_SIZE_CDC_ONLY, 0x02, 0x01, USB_CONFIG_BUS_POWERED, USBD_MAX_POWER_MA),
+    CDC_ACM_DESCRIPTOR_INIT(0x00, 0x84, 0x04, 0x82, CDC_MAX_MPS, USB_STRING_CONSOLE_INTF_INDEX),
+};
+
 static const uint8_t s_device_quality_descriptor[] = {
     0x0a,
     USB_DESCRIPTOR_TYPE_DEVICE_QUALIFIER,
@@ -150,6 +161,11 @@ static const uint8_t *device_descriptor_callback(uint8_t speed)
 static const uint8_t *config_descriptor_callback(uint8_t speed)
 {
     (void)speed;
+
+    if (!s_ethernet_enabled)
+    {
+        return s_config_descriptor_cdc_only;
+    }
 
     if (usbnet_class_kind() == USBNET_CLASS_KIND_RNDIS)
     {
@@ -341,6 +357,21 @@ static void usbnet_evt_task(void *arg)
         uint32_t bits = 0;
         (void)xTaskNotifyWait(0, UINT32_MAX, &bits, portMAX_DELAY);
 
+        if (!s_ethernet_enabled)
+        {
+            /* console only: no data path, no netif; CONFIGURED arms the
+             * console, a reset/disconnect needs nothing from us */
+            if ((bits & USBNET_EVT_CONFIGURED) != 0u)
+            {
+                ESP_LOGI(TAG, "USB configured (CDC console only)");
+                if (s_console_enabled)
+                {
+                    usb_cli_console_usb_on_configured(0);
+                }
+            }
+            continue;
+        }
+
         if (usbnet_class_kind() == USBNET_CLASS_KIND_NCM)
         {
             /* NCM: the data path opens when the host selects data alt 1
@@ -453,6 +484,16 @@ bool usbnet_usb_get_console_enabled(void)
     return s_console_enabled;
 }
 
+void usbnet_usb_set_ethernet_enabled(bool enabled)
+{
+    s_ethernet_enabled = enabled;
+}
+
+bool usbnet_usb_get_ethernet_enabled(void)
+{
+    return s_ethernet_enabled;
+}
+
 bool usbnet_usb_wait_tx_done(TickType_t ticks)
 {
     if (!s_tx_done_sem)
@@ -518,8 +559,8 @@ void usbnet_usb_start(void)
 
     ESP_LOGI(TAG,
              "Starting CherryUSB %s%s (netif MAC %02X:%02X:%02X:%02X:%02X:%02X, host adapter MAC %02X:%02X:%02X:%02X:%02X:%02X)",
-             usbnet_class_name(),
-             s_console_enabled ? "+CDC" : "",
+             s_ethernet_enabled ? usbnet_class_name() : "CDC console only",
+             (s_ethernet_enabled && s_console_enabled) ? "+CDC" : "",
              dev_mac[0],
              dev_mac[1],
              dev_mac[2],
@@ -541,17 +582,20 @@ void usbnet_usb_start(void)
 #endif
 
     // Add interfaces in the exact order they appear in the config descriptor:
-    // - USB Ethernet (NCM or RNDIS): interfaces 0..1
-    // - CDC-ACM console (optional): interfaces 2..3
-    if (usbnet_class_kind() == USBNET_CLASS_KIND_NCM)
+    // - USB Ethernet (NCM or RNDIS): interfaces 0..1 (when enabled)
+    // - CDC-ACM console (optional): interfaces 2..3, or 0..1 on its own
+    if (s_ethernet_enabled)
     {
-        usbd_add_interface(0, usbd_cdc_ncm_init_intf(&s_eth_intf0, CDC_INT_EP, CDC_OUT_EP, CDC_IN_EP));
-        usbd_add_interface(0, usbd_cdc_ncm_init_data_intf(&s_eth_intf1));
-    }
-    else
-    {
-        usbd_add_interface(0, usbd_rndis_init_intf(&s_eth_intf0, CDC_OUT_EP, CDC_IN_EP, CDC_INT_EP, st->rndis_host_mac));
-        usbd_add_interface(0, usbd_rndis_init_intf(&s_eth_intf1, CDC_OUT_EP, CDC_IN_EP, CDC_INT_EP, st->rndis_host_mac));
+        if (usbnet_class_kind() == USBNET_CLASS_KIND_NCM)
+        {
+            usbd_add_interface(0, usbd_cdc_ncm_init_intf(&s_eth_intf0, CDC_INT_EP, CDC_OUT_EP, CDC_IN_EP));
+            usbd_add_interface(0, usbd_cdc_ncm_init_data_intf(&s_eth_intf1));
+        }
+        else
+        {
+            usbd_add_interface(0, usbd_rndis_init_intf(&s_eth_intf0, CDC_OUT_EP, CDC_IN_EP, CDC_INT_EP, st->rndis_host_mac));
+            usbd_add_interface(0, usbd_rndis_init_intf(&s_eth_intf1, CDC_OUT_EP, CDC_IN_EP, CDC_INT_EP, st->rndis_host_mac));
+        }
     }
 
     if (s_console_enabled)
@@ -563,8 +607,9 @@ void usbnet_usb_start(void)
      * The IDF DHCP server always offers our address as DNS (option 6 even
      * with the DNS offer disabled), and a proxy with no upstream made the
      * host's resolver wait on it; a closed port answers ICMP port-unreachable
-     * so the host moves on to its own resolvers at once. */
-    if (st->offer_router)
+     * so the host moves on to its own resolvers at once. No netif at all
+     * without the Ethernet function. */
+    if (s_ethernet_enabled && st->offer_router)
     {
         usbnet_dns_proxy_start();
     }

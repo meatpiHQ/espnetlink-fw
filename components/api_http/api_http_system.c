@@ -22,8 +22,10 @@ static const char *TAG = "api_http";
 
 /* device-contract v2: the control-API level GET /api/info reports.
  * Bump when the /api surface changes incompatibly. 8 (2026-10-07): the
- * SIM state and the bring-up stage on /api/lte and in the health. */
-#define API_INFO_API_LEVEL 8
+ * SIM state and the bring-up stage on /api/lte and in the health.
+ * 9 (2026-10-12): wifi_modem v2: `boot_cut` left the health document,
+ * `usb_ethernet` joined it, `usb_mode` is auto | ncm | console. */
+#define API_INFO_API_LEVEL 9
 
 /* ---- GET /api/status ----------------------------------------------------------- */
 

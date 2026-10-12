@@ -12,6 +12,11 @@ extern "C" {
 void usbnet_usb_set_console_enabled(bool enabled);
 bool usbnet_usb_get_console_enabled(void);
 
+/* false = the CDC console alone (no Ethernet interfaces, no netif); set
+ * before usbnet_usb_start(). Default true. */
+void usbnet_usb_set_ethernet_enabled(bool enabled);
+bool usbnet_usb_get_ethernet_enabled(void);
+
 void usbnet_usb_start(void);
 
 // Blocks until the previous USB IN transfer completes (best-effort).

@@ -79,11 +79,13 @@ static esp_err_t persist_bool(const char *field, bool val)
     return err;
 }
 
-/* Fresh device: schema defaults persist and apply. ncm_share defaults FALSE
- * since the WiFi-modem mode (2026-08-23): the USB link is a control/pairing
- * channel, internet is served over the AP, and sharing the slow LTE uplink
- * over USB silently moved a PC's default route onto it. If this assertion
- * ever fails, someone changed the product behavior, not a test detail. */
+/* Fresh device: schema defaults persist and apply. ncm_share defaults TRUE
+ * again since 2026-10-12: the dongle starts as a USB LTE modem in every
+ * mode and the WiCAN pairs in usb_rndis mode by default, so a matching
+ * default spares the dongle restart at the first contact (it was false from
+ * 2026-08-23, when the USB link was a control channel only). If this
+ * assertion ever fails, someone changed the product behavior, not a test
+ * detail. */
 void test_defaults_applied_and_cli_registered(void)
 {
     fixture_reset();
@@ -98,7 +100,7 @@ void test_defaults_applied_and_cli_registered(void)
     TEST_ASSERT_EQUAL_STRING("", cfg->apn_user);
     TEST_ASSERT_EQUAL_STRING("", cfg->apn_password);
     TEST_ASSERT_EQUAL_STRING("", cfg->apn_pin);
-    TEST_ASSERT_FALSE(cfg->ncm_share);
+    TEST_ASSERT_TRUE(cfg->ncm_share);
     TEST_ASSERT_TRUE(cfg->cli);
     TEST_ASSERT_EQUAL(1, s_cli_registrations);
 }

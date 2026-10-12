@@ -5,10 +5,14 @@
  *
  * Field names mirror the legacy config_manager keys (APN, LTE_ENABLED, ...);
  * main's one-time legacy import maps the old /storage/config.json values
- * onto this descriptor. `ncm_share` defaults to FALSE since the WiFi-modem
- * mode (2026-08-23): the USB link is a control/pairing channel and internet
- * is served over the AP; sharing the slow LTE uplink over USB silently
- * moved a PC's default route onto it. Opt back in per device.
+ * onto this descriptor. `ncm_share` defaults to TRUE again since 2026-10-12:
+ * the dongle starts as a USB LTE modem in every mode (the WiCAN pairs in
+ * usb_rndis mode by default and needs the uplink shared over the wire), so
+ * a matching default spares the dongle restart that the WiCAN's ensure
+ * pass would otherwise cost at the first contact. A PC on the cable gets
+ * its default route over LTE with it; turn it off per device (the dongle's
+ * web UI) to keep the USB link a control channel. (2026-08-23 to
+ * 2026-10-12 the default was false, for that PC case.)
  */
 #include <stdio.h>
 
@@ -26,7 +30,7 @@ static const settings_field_t FIELDS[] =
     SETTINGS_STR ("apn_user",     32, ""),       /* legacy APN_USER    */
     SETTINGS_STR ("apn_password", 32, ""),       /* legacy APN_PASS    */
     SETTINGS_STR ("apn_pin",       8, ""),       /* legacy APN_PIN     */
-    SETTINGS_BOOL("ncm_share", false),           /* legacy NCM_SHARE   */
+    SETTINGS_BOOL("ncm_share", true),            /* legacy NCM_SHARE   */
     SETTINGS_BOOL("cli",       true),
 };
 
@@ -67,7 +71,7 @@ static bool get_bool(const cJSON *obj, const char *key, bool fallback)
 static esp_err_t on_apply(const cJSON *settings)
 {
     s_cfg.enabled   = get_bool(settings, "enabled", true);
-    s_cfg.ncm_share = get_bool(settings, "ncm_share", false);
+    s_cfg.ncm_share = get_bool(settings, "ncm_share", true);
     s_cfg.cli       = get_bool(settings, "cli", true);
     copy_str(s_cfg.apn, sizeof(s_cfg.apn), settings, "apn");
     copy_str(s_cfg.apn_user, sizeof(s_cfg.apn_user), settings, "apn_user");

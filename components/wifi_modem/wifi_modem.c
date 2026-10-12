@@ -1,13 +1,21 @@
 /**
  * @file wifi_modem.c
- * @brief wifi_modem engine: lifecycle, boot-time USB data-cut, AP NAPT into
- *        the PPP uplink, DHCP DNS offer, upstream-DNS tracking.
+ * @brief wifi_modem engine: lifecycle, the boot-time USB route, the runtime
+ *        USB data cut, AP NAPT into the PPP uplink, DHCP DNS offer,
+ *        upstream-DNS tracking.
  *
  * Sequence (main.c):
  *   settings_manager_start -> wifi_modem_provision()        (AP password)
- *                          -> wifi_modem_apply_usb_route()  (mux 1/1)
+ *                          -> wifi_modem_apply_usb_route()  (mux released)
  *   ... wifi_manager_start -> wifi_modem_start()            (NAPT/DNS)
- *   usb_dev_ethernet_start only if wifi_modem_usb_data_enabled()
+ *   usb_dev_ethernet_start in every mode; the Ethernet function only when
+ *   wifi_modem_usb_ethernet_enabled() (usb_mode console = CDC console only)
+ *
+ * 2026-10-12: nothing about a cut persists. Every boot leaves the data
+ * lines on the DIP route; a host's runtime cut lasts until the next boot.
+ * (The boot-cut hint, the boot-time cut and the 60 s no-station restore
+ * of 2026-08-24 are gone: a forgotten AP password must never lock the
+ * owner out of a device that only answers over its own AP.)
  *
  * NAPT is lwIP-global: ip_napt_enable(<LAN-side address>, 1) marks the AP
  * netif as the NATed side; traffic leaves through the default route (the
@@ -45,12 +53,6 @@ static const char *TAG = "wifi_modem";
 
 #define SHARE_TASK_STACK 4096
 #define AP_ADDR_WAIT_S   60
-/* boot-cut fallback: lines cut at boot by the hint, but no station joins
- * the AP -> the host is not a paired WiCAN (a PC, or the WiCAN lost its
- * key): restore the data lines and clear the hint. 60 s clears a WiCAN's
- * worst-case boot+scan+join comfortably. */
-#define BOOT_CUT_RESTORE_S    60
-#define RESTORE_TASK_STACK    6144   /* internal: settings store (LittleFS) */
 
 static bool s_started;
 static volatile bool s_usb_cut;            /* data lines driven to 1/1 */
@@ -60,13 +62,8 @@ static uint32_t s_ap_ip;                  /* network order, 0 = not armed */
 static uint32_t s_upstream_dns;           /* network order */
 static bool s_ip_handler_registered;
 static TaskHandle_t s_share_task;
-static bool s_boot_cut_hint;         /* runtime shadow of the persisted key */
-static bool s_boot_cut_applied;      /* this boot's route came from the hint */
-static bool s_ap_client_seen;        /* any station since boot */
-static bool s_ap_handler_registered;
-static esp_timer_handle_t s_restore_timer;
 
-/* §2: static stack in PSRAM (esp_netif ipc + socket setup only — no flash) */
+/* §2: static stack in PSRAM (esp_netif ipc + socket setup only, no flash) */
 static StaticTask_t s_share_tcb;                              /* internal: TCB */
 static StackType_t s_share_stack[SHARE_TASK_STACK] EXT_RAM_BSS_ATTR;
 
@@ -90,7 +87,7 @@ esp_err_t wifi_modem_provision(bool *reboot_required)
 
 /* SEL1/SEL2 = 1/1 = every USB data path disconnected; VBUS still powers
  * us. The deep-sleep path holds these pins (gpio_hold_en) and IDF v6's
- * gpio_reset_pin does NOT release a hold — clear it first. INPUT_OUTPUT
+ * gpio_reset_pin does NOT release a hold: clear it first. INPUT_OUTPUT
  * keeps the readback honest (the DIP is a weak pull). */
 static void mux_cut(void)
 {
@@ -116,34 +113,6 @@ static void mux_release(void)
     s_usb_cut = false;
 }
 
-bool wifi_modem_boot_cut_hint(void)
-{
-    return s_boot_cut_hint;
-}
-
-void wifi_modem_hint_note(bool usb_data_enabled)
-{
-    bool hint = !usb_data_enabled;
-
-    if (!wifi_modem_settings_is_configured() ||
-        wifi_modem_settings_config()->usb_mode != WIFI_MODEM_USB_AUTO)
-    {
-        return; /* the hint only means anything in auto mode */
-    }
-    if (s_boot_cut_hint == hint)
-    {
-        return;
-    }
-
-    s_boot_cut_hint = hint;
-    /* change-guarded by the settings store's dedup; event-driven (§11) */
-    if (wifi_modem_settings_persist_bool("boot_cut", hint) == ESP_OK)
-    {
-        ESP_LOGI(TAG, "boot-cut hint %s (next boot: USB data %s)",
-                 hint ? "armed" : "cleared", hint ? "cut" : "on");
-    }
-}
-
 esp_err_t wifi_modem_apply_usb_route(void)
 {
     if (!wifi_modem_settings_is_configured())
@@ -153,77 +122,16 @@ esp_err_t wifi_modem_apply_usb_route(void)
 
     const wifi_modem_settings_t *cfg = wifi_modem_settings_config();
 
-    s_boot_cut_hint = cfg->boot_cut;
-
-    if (!wmc_boot_cut_route(cfg->usb_mode, cfg->boot_cut))
-    {
-        s_usb_cut = false;
-        ESP_LOGI(TAG, "usb_mode=%s: mux left on the DIP route (SEL1=%d SEL2=%d)",
-                 wmc_usb_mode_str(cfg->usb_mode), gpio_get_level(USB_SEL_1),
-                 gpio_get_level(USB_SEL_2));
-        return ESP_OK;
-    }
-
-    mux_cut();
-    if (cfg->usb_mode == WIFI_MODEM_USB_AUTO)
-    {
-        s_boot_cut_applied = true;
-        ESP_LOGI(TAG, "boot-cut hint: USB DATA CUT at boot (readback SEL1=%d "
-                      "SEL2=%d) - GPS acquires with a quiet bus; auto-restore "
-                      "in %d s unless a station joins the AP",
-                 gpio_get_level(USB_SEL_1), gpio_get_level(USB_SEL_2),
-                 BOOT_CUT_RESTORE_S);
-        return ESP_OK;
-    }
-    ESP_LOGW(TAG, "usb_mode=power_only: USB DATA CUT at the mux (readback "
-                  "SEL1=%d SEL2=%d) - internet/GPS served over the WiFi AP",
-             gpio_get_level(USB_SEL_1), gpio_get_level(USB_SEL_2));
+    /* every mode: the DIP route (USB data on) at boot, whatever the last
+     * run did; a deep-sleep hold on the pins is released here */
+    mux_release();
+    ESP_LOGI(TAG, "usb_mode=%s: USB data on the DIP route at boot (SEL1=%d "
+                  "SEL2=%d)%s",
+             wmc_usb_mode_str(cfg->usb_mode), gpio_get_level(USB_SEL_1),
+             gpio_get_level(USB_SEL_2),
+             wmc_usb_ethernet_present(cfg->usb_mode)
+                 ? "" : " - CDC console only, no USB Ethernet");
     return ESP_OK;
-}
-
-/* ---- boot-cut fallback restore ------------------------------------------ */
-
-/* one-shot, internal-RAM stack: the settings store walks LittleFS on the
- * caller's stack (never from the esp_timer task) */
-static void restore_task(void *arg)
-{
-    (void)arg;
-
-    if (s_ap_client_seen || wifi_manager_get_ap_station_count() > 0)
-    {
-        ESP_LOGD(TAG, "boot-cut: a station joined the AP - staying cut");
-    }
-    else
-    {
-        ESP_LOGW(TAG, "boot-cut: no station joined the AP within %d s - "
-                      "restoring USB data (a PC on the cable?)",
-                 BOOT_CUT_RESTORE_S);
-        (void)wifi_modem_usb_data_set(true);
-        wifi_modem_hint_note(true);
-    }
-    vTaskDelete(NULL);
-}
-
-static void restore_timer_cb(void *arg)
-{
-    (void)arg;
-
-    if (xTaskCreate(restore_task, "wm_restore", RESTORE_TASK_STACK, NULL, 4,
-                    NULL) != pdPASS)
-    {
-        ESP_LOGE(TAG, "boot-cut restore task alloc failed; restoring inline");
-        (void)wifi_modem_usb_data_set(true);
-    }
-}
-
-static void on_ap_staconnected(void *arg, esp_event_base_t base, int32_t id,
-                               void *data)
-{
-    (void)arg;
-    (void)base;
-    (void)id;
-    (void)data;
-    s_ap_client_seen = true;
 }
 
 bool wifi_modem_usb_data_routed(void)
@@ -258,7 +166,7 @@ esp_err_t wifi_modem_usb_data_set(bool enabled)
     {
         mux_cut();
         ESP_LOGI(TAG, "USB data CUT at the mux by the host (readback SEL1=%d "
-                      "SEL2=%d) - cable is power only",
+                      "SEL2=%d) - cable is power only until the next boot",
                  gpio_get_level(USB_SEL_1), gpio_get_level(USB_SEL_2));
     }
 
@@ -362,7 +270,7 @@ static void on_ip_event(void *arg, esp_event_base_t base, int32_t id,
 
 /* The AP netif carries its address from wifi_manager_start, but stay
  * tolerant: poll briefly, then arm NAPT + DNS offer + proxy. Exits once
- * armed (or on stop) — no long-lived task. */
+ * armed (or on stop): no long-lived task. */
 static void share_task(void *arg)
 {
     (void)arg;
@@ -417,41 +325,10 @@ esp_err_t wifi_modem_start(void)
 
     const wifi_modem_settings_t *cfg = wifi_modem_settings_config();
 
-    if (s_boot_cut_applied)
+    if (cfg->usb_mode == WIFI_MODEM_USB_CONSOLE && !wifi_manager_mode_has_ap())
     {
-        esp_err_t aerr = esp_event_handler_register(
-            WIFI_EVENT, WIFI_EVENT_AP_STACONNECTED, on_ap_staconnected, NULL);
-
-        s_ap_handler_registered = (aerr == ESP_OK);
-
-        const esp_timer_create_args_t targs =
-        {
-            .callback = restore_timer_cb,
-            .name = "wm_restore",
-        };
-
-        if (s_restore_timer == NULL &&
-            esp_timer_create(&targs, &s_restore_timer) != ESP_OK)
-        {
-            s_restore_timer = NULL;
-        }
-        if (s_restore_timer != NULL)
-        {
-            (void)esp_timer_start_once(s_restore_timer,
-                                       (uint64_t)BOOT_CUT_RESTORE_S * 1000000ULL);
-        }
-        else
-        {
-            /* no timer = no fallback: fail open so a PC is never locked out */
-            ESP_LOGE(TAG, "boot-cut fallback timer failed; restoring USB data");
-            (void)wifi_modem_usb_data_set(true);
-        }
-    }
-
-    if (cfg->usb_mode == WIFI_MODEM_USB_POWER_ONLY && !wifi_manager_mode_has_ap())
-    {
-        ESP_LOGW(TAG, "usb_mode=power_only but the WiFi mode has no AP: "
-                      "nothing can reach this device");
+        ESP_LOGW(TAG, "usb_mode=console but the WiFi mode has no AP: only "
+                      "the USB console can reach this device");
     }
 
     if (!cfg->ap_share || !wifi_manager_mode_has_ap())
@@ -492,18 +369,6 @@ esp_err_t wifi_modem_stop(void)
     }
 
     s_stop = true;
-
-    if (s_restore_timer != NULL)
-    {
-        (void)esp_timer_stop(s_restore_timer);
-    }
-    if (s_ap_handler_registered)
-    {
-        (void)esp_event_handler_unregister(WIFI_EVENT,
-                                           WIFI_EVENT_AP_STACONNECTED,
-                                           on_ap_staconnected);
-        s_ap_handler_registered = false;
-    }
 
     /* the share task polls at 1 Hz and exits on s_stop */
     for (int i = 0; i < 30 && s_share_task != NULL; i++)

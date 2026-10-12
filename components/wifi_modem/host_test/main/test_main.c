@@ -1,12 +1,13 @@
 /**
  * @file test_main.c
  * @brief Host tests for wifi_modem (§7): the pure helpers, the "wifi_modem"
- *        settings descriptor run against the real settings_manager registry
- *        with the in-memory storage stub (defaults, enum validation,
- *        reboot-to-apply, the §6b `cli` gate), and the one-time AP password
- *        provisioning (stock → generated + marker, custom → marker only,
- *        never twice).
- *        Expected: 14 Tests 0 Failures 0 Ignored.
+ *        settings descriptor (v2) run against the real settings_manager
+ *        registry with the in-memory storage stub (defaults, enum
+ *        validation, reboot-to-apply, the §6b `cli` gate), the v1 to v2
+ *        migration (pure and through the boot pass), and the one-time AP
+ *        password provisioning (stock to generated + marker, custom to
+ *        marker only, never twice).
+ *        Expected: 17 Tests 0 Failures 0 Ignored.
  */
 #include <stdlib.h>
 #include <string.h>
@@ -21,7 +22,7 @@
 #include "test_storage_stub.h"
 
 /* wifi_modem_settings.c's on_apply registers the console command when
- * `cli` is true. The CLI translation unit isn't part of this host build —
+ * `cli` is true. The CLI translation unit isn't part of this host build:
  * this spy satisfies the link AND lets the tests assert the gate. */
 static int s_cli_registrations;
 
@@ -124,48 +125,56 @@ static bool stored_bool(const char *comp, const char *key)
     return v;
 }
 
+static bool stored_has(const char *comp, const char *key)
+{
+    cJSON *obj = sm_stub_read(comp, NULL);
+    bool has = obj != NULL && cJSON_HasObjectItem(obj, key);
+
+    cJSON_Delete(obj);
+    return has;
+}
+
 /* ---- pure helpers ------------------------------------------------------ */
 
 void test_usb_mode_strings(void)
 {
-    wifi_modem_usb_mode_t m = WIFI_MODEM_USB_POWER_ONLY;
+    wifi_modem_usb_mode_t m = WIFI_MODEM_USB_CONSOLE;
 
     TEST_ASSERT_EQUAL_STRING("auto", wmc_usb_mode_str(WIFI_MODEM_USB_AUTO));
     TEST_ASSERT_EQUAL_STRING("ncm", wmc_usb_mode_str(WIFI_MODEM_USB_NCM));
-    TEST_ASSERT_EQUAL_STRING("power_only",
-                             wmc_usb_mode_str(WIFI_MODEM_USB_POWER_ONLY));
+    TEST_ASSERT_EQUAL_STRING("console",
+                             wmc_usb_mode_str(WIFI_MODEM_USB_CONSOLE));
     TEST_ASSERT_TRUE(wmc_usb_mode_parse("auto", &m));
     TEST_ASSERT_EQUAL(WIFI_MODEM_USB_AUTO, m);
     TEST_ASSERT_TRUE(wmc_usb_mode_parse("ncm", &m));
     TEST_ASSERT_EQUAL(WIFI_MODEM_USB_NCM, m);
-    TEST_ASSERT_TRUE(wmc_usb_mode_parse("power_only", &m));
-    TEST_ASSERT_EQUAL(WIFI_MODEM_USB_POWER_ONLY, m);
+    TEST_ASSERT_TRUE(wmc_usb_mode_parse("console", &m));
+    TEST_ASSERT_EQUAL(WIFI_MODEM_USB_CONSOLE, m);
+    /* the retired v1 value is no token any more: the migration maps it */
+    TEST_ASSERT_FALSE(wmc_usb_mode_parse("power_only", &m));
     TEST_ASSERT_FALSE(wmc_usb_mode_parse("NCM", &m));
     TEST_ASSERT_FALSE(wmc_usb_mode_parse("", &m));
     TEST_ASSERT_FALSE(wmc_usb_mode_parse(NULL, &m));
-    TEST_ASSERT_EQUAL(WIFI_MODEM_USB_POWER_ONLY, m); /* untouched */
+    TEST_ASSERT_EQUAL(WIFI_MODEM_USB_CONSOLE, m); /* untouched */
 }
 
 /* Runtime USB switch policy: ncm locks the lines on, the others let the
- * host (the WiCAN) cut/restore them. */
+ * host (the WiCAN) cut/restore them until the next boot. */
 void test_usb_data_switchable(void)
 {
     TEST_ASSERT_TRUE(wmc_usb_data_switchable(WIFI_MODEM_USB_AUTO));
     TEST_ASSERT_FALSE(wmc_usb_data_switchable(WIFI_MODEM_USB_NCM));
-    TEST_ASSERT_TRUE(wmc_usb_data_switchable(WIFI_MODEM_USB_POWER_ONLY));
+    TEST_ASSERT_TRUE(wmc_usb_data_switchable(WIFI_MODEM_USB_CONSOLE));
 }
 
-void test_boot_cut_route(void)
+/* What the USB device presents: the Ethernet function in auto and ncm,
+ * the CDC console alone in console. (The data lines are on the DIP route
+ * at boot in every mode: there is no boot-time cut to decide any more.) */
+void test_usb_ethernet_present(void)
 {
-    /* power_only: always cut, hint irrelevant */
-    TEST_ASSERT_TRUE(wmc_boot_cut_route(WIFI_MODEM_USB_POWER_ONLY, false));
-    TEST_ASSERT_TRUE(wmc_boot_cut_route(WIFI_MODEM_USB_POWER_ONLY, true));
-    /* auto: the boot-cut hint decides (the paired-WiCAN steady state) */
-    TEST_ASSERT_FALSE(wmc_boot_cut_route(WIFI_MODEM_USB_AUTO, false));
-    TEST_ASSERT_TRUE(wmc_boot_cut_route(WIFI_MODEM_USB_AUTO, true));
-    /* ncm: locked on — a stale hint must be ignored */
-    TEST_ASSERT_FALSE(wmc_boot_cut_route(WIFI_MODEM_USB_NCM, false));
-    TEST_ASSERT_FALSE(wmc_boot_cut_route(WIFI_MODEM_USB_NCM, true));
+    TEST_ASSERT_TRUE(wmc_usb_ethernet_present(WIFI_MODEM_USB_AUTO));
+    TEST_ASSERT_TRUE(wmc_usb_ethernet_present(WIFI_MODEM_USB_NCM));
+    TEST_ASSERT_FALSE(wmc_usb_ethernet_present(WIFI_MODEM_USB_CONSOLE));
 }
 
 /* Credentials only leave over a non-WiFi interface: the USB link passes,
@@ -255,16 +264,124 @@ void test_dns_pick_and_ipv4_format(void)
     TEST_ASSERT_FALSE(wmc_format_ipv4(learned, NULL, 16));
 }
 
+/* ---- the v1 to v2 migration (pure) ---------------------------------------- */
+
+static cJSON *v1_object(const char *usb_mode, bool boot_cut)
+{
+    cJSON *o = cJSON_CreateObject();
+
+    cJSON_AddStringToObject(o, "usb_mode", usb_mode);
+    cJSON_AddBoolToObject(o, "ap_share", true);
+    cJSON_AddBoolToObject(o, "ap_password_provisioned", true);
+    cJSON_AddBoolToObject(o, "boot_cut", boot_cut);
+    cJSON_AddBoolToObject(o, "cli", true);
+    return o;
+}
+
+static const char *mode_of(const cJSON *o)
+{
+    const cJSON *m = cJSON_GetObjectItemCaseSensitive(o, "usb_mode");
+
+    return cJSON_IsString(m) ? m->valuestring : "";
+}
+
+void test_migrate_v1_to_v2(void)
+{
+    /* the charger-powered unit: power_only becomes console, the hint goes */
+    cJSON *o = v1_object("power_only", true);
+
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_modem_settings_migrate(1, o));
+    TEST_ASSERT_EQUAL_STRING("console", mode_of(o));
+    TEST_ASSERT_FALSE(cJSON_HasObjectItem(o, "boot_cut"));
+    TEST_ASSERT_TRUE(cJSON_IsTrue(
+        cJSON_GetObjectItemCaseSensitive(o, "ap_password_provisioned")));
+    cJSON_Delete(o);
+
+    /* the paired-WiCAN unit: auto stays auto, the armed hint is dropped */
+    o = v1_object("auto", true);
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_modem_settings_migrate(1, o));
+    TEST_ASSERT_EQUAL_STRING("auto", mode_of(o));
+    TEST_ASSERT_FALSE(cJSON_HasObjectItem(o, "boot_cut"));
+    cJSON_Delete(o);
+
+    /* the PC-tethering unit: untouched but for the hint */
+    o = v1_object("ncm", false);
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_modem_settings_migrate(1, o));
+    TEST_ASSERT_EQUAL_STRING("ncm", mode_of(o));
+    TEST_ASSERT_FALSE(cJSON_HasObjectItem(o, "boot_cut"));
+    cJSON_Delete(o);
+
+    /* a version 0 (never shipped) is lifted the same way; a current
+     * object is left alone even when it carries an old value */
+    o = v1_object("power_only", false);
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_modem_settings_migrate(0, o));
+    TEST_ASSERT_EQUAL_STRING("console", mode_of(o));
+    cJSON_Delete(o);
+
+    o = v1_object("power_only", true);
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_modem_settings_migrate(2, o));
+    TEST_ASSERT_EQUAL_STRING("power_only", mode_of(o));
+    TEST_ASSERT_TRUE(cJSON_HasObjectItem(o, "boot_cut"));
+    cJSON_Delete(o);
+
+    /* not an object: refused, nothing to migrate */
+    o = cJSON_CreateString("x");
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, wifi_modem_settings_migrate(1, o));
+    cJSON_Delete(o);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, wifi_modem_settings_migrate(1, NULL));
+}
+
+/* The boot pass over a stored v1 object (a field unit updated in place):
+ * the migration runs once, the result is validated against the v2 schema,
+ * persisted as v2 without the hint, and applied: a power_only unit comes
+ * up in console mode with the USB Ethernet function off. */
+void test_migrate_through_boot_pass(void)
+{
+    uint32_t version = 0;
+
+    fixture_reset();
+    sm_stub_put("wifi_modem", 1,
+                "{\"usb_mode\":\"power_only\",\"ap_share\":true,"
+                "\"ap_password_provisioned\":true,\"boot_cut\":true,"
+                "\"cli\":true}");
+    TEST_ASSERT_EQUAL(ESP_OK, settings_manager_start());
+
+    TEST_ASSERT_TRUE(wifi_modem_settings_is_configured());
+    TEST_ASSERT_EQUAL(WIFI_MODEM_USB_CONSOLE,
+                      wifi_modem_settings_config()->usb_mode);
+    TEST_ASSERT_TRUE(wifi_modem_settings_config()->ap_password_provisioned);
+    TEST_ASSERT_FALSE(wifi_modem_usb_ethernet_enabled());
+
+    TEST_ASSERT_EQUAL_STRING("console", stored_string("wifi_modem", "usb_mode"));
+    TEST_ASSERT_FALSE(stored_has("wifi_modem", "boot_cut"));
+
+    cJSON *obj = sm_stub_read("wifi_modem", &version);
+
+    TEST_ASSERT_NOT_NULL(obj);
+    cJSON_Delete(obj);
+    TEST_ASSERT_EQUAL_UINT32(2, version);
+
+    /* the next boot finds a v2 object: nothing to migrate, the mode holds
+     * (the in-memory stub has no persisted_clean guard, so the boot pass
+     * itself writes here; the device's zero-write boot is asserted by the
+     * benches, not by this harness) */
+    simulated_reboot();
+    TEST_ASSERT_EQUAL(WIFI_MODEM_USB_CONSOLE,
+                      wifi_modem_settings_config()->usb_mode);
+    TEST_ASSERT_FALSE(wifi_modem_usb_ethernet_enabled());
+    TEST_ASSERT_FALSE(stored_has("wifi_modem", "boot_cut"));
+}
+
 /* ---- settings descriptor ------------------------------------------------ */
 
-/* Fresh device: schema defaults persist and apply; usb_mode=auto keeps
- * USB data routed at boot (today's behaviour for a PC; the WiCAN cuts it
- * at runtime); cli gate registers the command exactly once. */
+/* Fresh device: schema defaults persist and apply; usb_mode=auto presents
+ * USB Ethernet (the WiCAN cuts the lines at runtime); cli gate registers
+ * the command exactly once. */
 void test_defaults_applied_and_cli_registered(void)
 {
     fixture_reset();
     TEST_ASSERT_FALSE(wifi_modem_settings_is_configured());
-    TEST_ASSERT_TRUE(wifi_modem_usb_data_enabled()); /* unconfigured = legacy */
+    TEST_ASSERT_TRUE(wifi_modem_usb_ethernet_enabled()); /* unconfigured = legacy */
 
     TEST_ASSERT_EQUAL(ESP_OK, settings_manager_start());
 
@@ -276,11 +393,14 @@ void test_defaults_applied_and_cli_registered(void)
     TEST_ASSERT_TRUE(cfg->ap_share);
     TEST_ASSERT_FALSE(cfg->ap_password_provisioned);
     TEST_ASSERT_TRUE(cfg->cli);
-    TEST_ASSERT_TRUE(wifi_modem_usb_data_enabled());
+    TEST_ASSERT_TRUE(wifi_modem_usb_ethernet_enabled());
     TEST_ASSERT_EQUAL(1, s_cli_registrations);
+    /* the v1 device-state key is not part of a fresh v2 object */
+    TEST_ASSERT_FALSE(stored_has("wifi_modem", "boot_cut"));
 }
 
-/* usb_mode is a closed enum: schema validation rejects anything else. */
+/* usb_mode is a closed enum: schema validation rejects anything else,
+ * the retired v1 value included. */
 void test_usb_mode_enum_rejected(void)
 {
     fixture_reset();
@@ -292,39 +412,42 @@ void test_usb_mode_enum_rejected(void)
                           wifi_modem_settings_persist_str("usb_mode", "usb"));
     TEST_ASSERT_NOT_EQUAL(ESP_OK,
                           wifi_modem_settings_persist_str("usb_mode", ""));
+    TEST_ASSERT_NOT_EQUAL(ESP_OK,
+                          wifi_modem_settings_persist_str("usb_mode",
+                                                          "power_only"));
     TEST_ASSERT_EQUAL(saves, sm_stub_save_count()); /* nothing written */
     TEST_ASSERT_EQUAL(ESP_OK,
-                      wifi_modem_settings_persist_str("usb_mode", "power_only"));
+                      wifi_modem_settings_persist_str("usb_mode", "console"));
     TEST_ASSERT_EQUAL(saves + 1, sm_stub_save_count());
 }
 
-/* Reboot-to-apply: a persisted power_only leaves the running config (and
- * the USB data decision) untouched until the next boot pass. */
-void test_reboot_to_apply_power_only(void)
+/* Reboot-to-apply: a persisted console mode leaves the running config
+ * (and the USB presentation decision) untouched until the next boot pass. */
+void test_reboot_to_apply_console(void)
 {
     fixture_reset();
     TEST_ASSERT_EQUAL(ESP_OK, settings_manager_start());
 
     TEST_ASSERT_EQUAL(ESP_OK,
-                      wifi_modem_settings_persist_str("usb_mode", "power_only"));
+                      wifi_modem_settings_persist_str("usb_mode", "console"));
     TEST_ASSERT_EQUAL(ESP_OK, wifi_modem_settings_persist_bool("ap_share", false));
     TEST_ASSERT_EQUAL(WIFI_MODEM_USB_AUTO, wifi_modem_settings_config()->usb_mode);
     TEST_ASSERT_TRUE(wifi_modem_settings_config()->ap_share);
-    TEST_ASSERT_TRUE(wifi_modem_usb_data_enabled());
+    TEST_ASSERT_TRUE(wifi_modem_usb_ethernet_enabled());
 
     simulated_reboot();
 
-    TEST_ASSERT_EQUAL(WIFI_MODEM_USB_POWER_ONLY,
+    TEST_ASSERT_EQUAL(WIFI_MODEM_USB_CONSOLE,
                       wifi_modem_settings_config()->usb_mode);
     TEST_ASSERT_FALSE(wifi_modem_settings_config()->ap_share);
-    TEST_ASSERT_FALSE(wifi_modem_usb_data_enabled());
+    TEST_ASSERT_FALSE(wifi_modem_usb_ethernet_enabled());
 }
 
 /* cli=false: the command is never registered. */
 void test_cli_gate_off(void)
 {
     fixture_reset();
-    sm_stub_put("wifi_modem", 1,
+    sm_stub_put("wifi_modem", 2,
                 "{\"usb_mode\":\"ncm\",\"ap_share\":true,"
                 "\"ap_password_provisioned\":false,\"cli\":false}");
     TEST_ASSERT_EQUAL(ESP_OK, settings_manager_start());
@@ -350,7 +473,7 @@ void test_provision_refuses_unconfigured(void)
 }
 
 /* Stock password on a fresh device: generated + persisted into
- * wifi_manager, marker set, reboot requested — and never again. */
+ * wifi_manager, marker set, reboot requested, and never again. */
 void test_provision_replaces_stock_password_once(void)
 {
     bool reboot = false;
@@ -406,7 +529,7 @@ void test_provision_respects_deliberate_stock_after_marker(void)
     bool reboot = true;
 
     fixture_reset();
-    sm_stub_put("wifi_modem", 1,
+    sm_stub_put("wifi_modem", 2,
                 "{\"usb_mode\":\"ncm\",\"ap_share\":true,"
                 "\"ap_password_provisioned\":true,\"cli\":true}");
     TEST_ASSERT_EQUAL(ESP_OK, settings_manager_start());
@@ -425,14 +548,19 @@ void app_main(void)
     UNITY_BEGIN();
     RUN_TEST(test_usb_mode_strings);
     RUN_TEST(test_usb_data_switchable);
-    RUN_TEST(test_boot_cut_route);
+    RUN_TEST(test_usb_ethernet_present);
     RUN_TEST(test_credentials_gate);
     RUN_TEST(test_password_policy_helpers);
     RUN_TEST(test_password_generator);
     RUN_TEST(test_dns_pick_and_ipv4_format);
+    RUN_TEST(test_migrate_v1_to_v2);
+    /* the FIRST boot pass of the process: the CLI "register once" guard in
+     * wifi_modem_settings.c is process-global, so the exact-once assertion
+     * only holds for whichever boot-pass test runs first */
     RUN_TEST(test_defaults_applied_and_cli_registered);
+    RUN_TEST(test_migrate_through_boot_pass);
     RUN_TEST(test_usb_mode_enum_rejected);
-    RUN_TEST(test_reboot_to_apply_power_only);
+    RUN_TEST(test_reboot_to_apply_console);
     RUN_TEST(test_cli_gate_off);
     RUN_TEST(test_provision_refuses_unconfigured);
     RUN_TEST(test_provision_replaces_stock_password_once);

@@ -1,8 +1,8 @@
 /**
  * @file wifi_modem_private.h
  * @brief Internal contracts of the wifi_modem component: the pure helpers
- *        (wifi_modem_core.c — host-tested), the DNS proxy, and the
- *        provisioning core. Not part of the public API.
+ *        (wifi_modem_core.c and wifi_modem_migrate.c, host-tested), the
+ *        DNS proxy, and the provisioning core. Not part of the public API.
  */
 #pragma once
 
@@ -12,6 +12,8 @@
 
 #include "esp_err.h"
 
+#include "cJSON.h"
+
 #include "wifi_modem.h"
 
 #ifdef __cplusplus
@@ -20,20 +22,20 @@ extern "C" {
 
 /* ---- pure helpers (wifi_modem_core.c) ------------------------------------ */
 
-/** "auto" / "ncm" / "power_only". */
+/** "auto" / "ncm" / "console". */
 const char *wmc_usb_mode_str(wifi_modem_usb_mode_t mode);
 
-/** Parse "auto" / "ncm" / "power_only"; false (out untouched) otherwise. */
+/** Parse "auto" / "ncm" / "console"; false (out untouched) otherwise. */
 bool wmc_usb_mode_parse(const char *s, wifi_modem_usb_mode_t *out);
 
 /** Whether the host may switch the USB data lines at runtime in @p mode
  *  (everything but ncm, which locks them on). */
 bool wmc_usb_data_switchable(wifi_modem_usb_mode_t mode);
 
-/** Whether the boot-time USB route is CUT: always for power_only; in auto
- *  when the boot-cut hint is set (the last runtime change was a host cut);
- *  never for ncm (locked on — a stale hint is ignored). */
-bool wmc_boot_cut_route(wifi_modem_usb_mode_t mode, bool boot_cut_hint);
+/** Whether the USB device presents the Ethernet function in @p mode:
+ *  auto and ncm yes, console no (the CDC console alone). The data lines
+ *  are on the DIP route at boot in EVERY mode (2026-10-12). */
+bool wmc_usb_ethernet_present(wifi_modem_usb_mode_t mode);
 
 /**
  * Whether a credentials request that arrived on local address @p local_be
@@ -72,20 +74,18 @@ uint32_t wmc_pick_upstream_dns(uint32_t learned_be);
 /** Dotted quad of a network-order IPv4; false when @p out is too small. */
 bool wmc_format_ipv4(uint32_t addr_be, char *out, size_t out_len);
 
-/* ---- boot-cut hint (wifi_modem.c) ----------------------------------------- */
-
-/** Live value of the boot-cut hint (runtime shadow of the persisted key). */
-bool wifi_modem_boot_cut_hint(void);
+/* ---- settings migration (wifi_modem_migrate.c, pure) ----------------------- */
 
 /**
- * Record the operator/host intent behind a runtime usb_data change:
- * a CUT arms the boot-cut hint (next boot cuts at the mux immediately),
- * a RESTORE clears it. Persists through the settings store (change-guarded
- * — no flash write when unchanged). MUST be called from an internal-RAM
- * stack task (httpd / console / a worker): the settings store walks
- * LittleFS on the caller's stack.
+ * Migrate a stored "wifi_modem" object from @p from_version to the current
+ * schema, in place. v1 (2026-08-23 to 2026-10-12) carried `usb_mode` with
+ * the value `power_only` and the device-state key `boot_cut`: `power_only`
+ * becomes `console` (the same charger-powered, AP-only use with a way back
+ * in), `boot_cut` is dropped (nothing about a cut persists any more). Any
+ * other stored value is left for the schema validation that follows.
+ * ESP_ERR_INVALID_ARG when @p settings is not an object.
  */
-void wifi_modem_hint_note(bool usb_data_enabled);
+esp_err_t wifi_modem_settings_migrate(uint32_t from_version, cJSON *settings);
 
 /* ---- settings (wifi_modem_settings.c) ------------------------------------ */
 

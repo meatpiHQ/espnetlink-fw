@@ -11,6 +11,7 @@ idf_component_register(
     SRCS "test_main.c"
          "${sm_dir}/host_test/main/test_storage_stub.c"
          "${comp_dir}/wifi_modem_core.c"
+         "${comp_dir}/wifi_modem_migrate.c"
          "${comp_dir}/wifi_modem_settings.c"
          "${comp_dir}/wifi_modem_provision.c"
          "${sm_dir}/settings_manager.c"

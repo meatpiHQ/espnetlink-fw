@@ -35,7 +35,7 @@ CONFIG_CHERRYUSB_DEVICE_SPEED_FS=y
 CONFIG_CHERRYUSB_DEVICE_DWC2_ESP=y
 CONFIG_CHERRYUSB_DEVICE_CDC_ACM=y
 CONFIG_CHERRYUSB_DEVICE_TEMPLATE_NONE=y
-CONFIG_USBNET_CLASS_NCM=y
+CONFIG_USBNET_CLASS_RNDIS=y
 
 # PSRAM: 8MB embedded octal (AP_3v3) — MeatPi standard §2. Static data,
 # task stacks, and reboot-surviving state default to PSRAM; memtest stays

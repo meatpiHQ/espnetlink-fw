@@ -2,12 +2,16 @@ menu "USB Ethernet (usb_dev_ethernet)"
 
     choice USBNET_CLASS
         prompt "USB Ethernet device class (settings default)"
-        default USBNET_CLASS_NCM
+        default USBNET_CLASS_RNDIS
         help
-            The DEFAULT for the usb_dev_ethernet `class` setting — since
+            The DEFAULT for the usb_dev_ethernet `class` setting: since
             2026-08-25 the class is selected at runtime (both compile in;
             a WiCAN host in usb_rndis mode flips the setting remotely via
-            PUT /api/settings/usb_dev_ethernet).
+            PUT /api/settings/usb_dev_ethernet). RNDIS is the default
+            since 2026-10-12 because the WiCAN pairs in usb_rndis mode by
+            default and a matching dongle default means no dongle restart
+            at the first contact (a restart costs minutes of LTE while the
+            modem recovers from CMUX).
 
             CDC-NCM is the class Windows ships an in-box driver for
             (UsbNcm.sys — Windows 11 24H2 removed the legacy RNDIS

@@ -584,9 +584,11 @@ void app_main(void)
                                 RESTART_TRACKER_SOURCE_UNKNOWN, 0);
     }
 
-    /* WiFi-modem mode: usb_mode=power_only cuts the USB data lines at the
-     * mux right here, before any USB device stack could enumerate (the
-     * WiCAN host's USB transmitter desenses the GNSS). */
+    /* The boot-time USB route: every mode boots with the data lines on the
+     * DIP route (2026-10-12: a host can always reach the device after a
+     * power cycle, whatever the last run cut); this also releases a mux
+     * hold left by deep sleep. A WiCAN host cuts the lines at runtime,
+     * after it has read the AP key, so the GNSS gets a quiet bus. */
     init_step("wifi_modem_apply_usb_route", wifi_modem_apply_usb_route);
 
     // GPS after the settings apply: its config is the "gps" descriptor
@@ -614,22 +616,25 @@ void app_main(void)
     start_component("ha_webhooks", ha_webhooks_start);
     start_component("cmdline_manager", cmdline_manager_start);
 
-    /* USB device stack only when the data lines are routed to us. The USB
-     * link offers itself as the host's default router ONLY when the LTE
-     * uplink is shared over it (ncm_share) — otherwise it is a control
-     * channel and the host's own internet path stays untouched. */
-    if (wifi_modem_usb_data_enabled())
+    /* The USB device stack starts in EVERY mode (2026-10-12): usb_mode
+     * auto and ncm present USB Ethernet + the CDC console, console presents
+     * the console alone (the WiFi AP is the product, the console the way
+     * back in). The USB link offers itself as the host's default router
+     * ONLY when the LTE uplink is shared over it (ncm_share), otherwise it
+     * is a control channel and the host's own internet path stays
+     * untouched. */
+    bool usb_eth = wifi_modem_usb_ethernet_enabled();
+
+    usb_dev_ethernet_set_console_enabled(true);
+    usb_dev_ethernet_set_ethernet_enabled(usb_eth);
+    usb_dev_ethernet_set_router_offer(
+        usb_eth && lte_upstream_pppos_settings_is_configured() &&
+        lte_upstream_pppos_settings()->ncm_share);
+    start_component("usb_dev_ethernet", usb_dev_ethernet_start);
+    if (!usb_eth)
     {
-        usb_dev_ethernet_set_console_enabled(true);
-        usb_dev_ethernet_set_router_offer(
-            lte_upstream_pppos_settings_is_configured() &&
-            lte_upstream_pppos_settings()->ncm_share);
-        start_component("usb_dev_ethernet", usb_dev_ethernet_start);
-    }
-    else
-    {
-        ESP_LOGW(TAG, "usb_dev_ethernet NOT started (wifi_modem usb_mode="
-                      "power_only)");
+        ESP_LOGW(TAG, "usb_mode=console: USB presents the CDC console only "
+                      "(no USB Ethernet); the WiFi AP is the product");
     }
 
 #if USB_DEV_ETHERNET_MODE && ENABLE_LTE_UPSTREAM_PPPOS

@@ -25,20 +25,40 @@ against, plus the concrete work list for `meatpi-components`
 Budget: dongle boot → cut in **≤ 10 s**. No pairing state on the dongle,
 nothing to un-pair, no reboot on either side after the first pairing.
 
-**2026-08-24 addendum — the boot-cut hint (`wifi_modem.boot_cut`).** The
-flow above is now only the FIRST-pairing / key-re-read path. A
-host-requested cut arms a device-state hint; every later boot in
-`usb_mode=auto` cuts the data lines at ~3 s, before the USB device stack
-starts — the WiCAN sees no USB device at all (its machine stays `idle`),
-joins the AP as usual, and **GPS acquires from power-on with a quiet
-bus** (no desense window, nothing to kill). Self-healing: if no station
-joins the AP within 60 s the dongle restores the lines and clears the
-hint (a PC gets tethering back one boot late; a WiCAN needing a key
-re-read gets its USB channel after the same 60 s — VBUS-cycle recovery
-is therefore ~75 s worst case). Any runtime `usb_data=1` restore or a
-factory reset clears the hint. Correspondingly the WiCAN **no longer
-VBUS-power-cycles at host start** (its connector mux provides the DWC2
-connect edge), so a WiCAN reboot never reboots the dongle or costs a fix.
+**2026-10-12 addendum: nothing about a cut persists (api_level 9).** The
+boot-cut hint of 2026-08-24 (below, kept for history) is gone: a user who
+forgot the AP password of a dongle that cut its USB at every boot had no
+way in. The dongle now boots with the USB data lines on in EVERY mode and
+enumerates as RNDIS (the new default class, matching the WiCAN's default
+`espnetlink.mode=usb_rndis`) or NCM plus the CDC console; `lte_upstream_
+pppos.ncm_share` defaults to true, so a fresh WiCAN in a USB mode needs
+no dongle restart at the first contact. A WiCAN in `wifi_modem` mode runs
+the flow above at EVERY dongle boot (identify, key read, cut; an
+unchanged key costs it nothing) and the cut lasts until the next boot.
+`wifi_modem.usb_mode` is `auto` | `ncm` | `console` (settings v2; v1's
+`power_only` migrates to `console`, `boot_cut` is dropped): `console`
+presents the CDC console ALONE on USB (no Ethernet function; the WiCAN
+sees a 303A:4007 device with a CDC interface and no network) so the owner
+of a charger-powered, AP-only dongle can always recover with
+`wifi_modem -k` / `wifi_modem -u auto`. The health document lost
+`boot_cut` and gained `usb_ethernet`. The WiCAN still never VBUS-cycles
+at host start; its AP-stale recovery (a VBUS cycle) now re-reads the key
+on the dongle's next enumeration instead of waiting out a self-restore.
+
+**2026-08-24 addendum (retired 2026-10-12): the boot-cut hint
+(`wifi_modem.boot_cut`).** The flow above was then only the FIRST-pairing
+/ key-re-read path. A host-requested cut armed a device-state hint; every
+later boot in `usb_mode=auto` cut the data lines at ~3 s, before the USB
+device stack started: the WiCAN saw no USB device at all (its machine
+stayed `idle`), joined the AP as usual, and GPS acquired from power-on
+with a quiet bus. Self-healing: if no station joined the AP within 60 s
+the dongle restored the lines and cleared the hint (a PC got tethering
+back one boot late; a WiCAN needing a key re-read got its USB channel
+after the same 60 s, so a VBUS-cycle recovery was ~75 s worst case). Any
+runtime `usb_data=1` restore or a factory reset cleared the hint.
+Correspondingly the WiCAN **no longer VBUS-power-cycles at host start**
+(its connector mux provides the DWC2 connect edge), so a WiCAN reboot
+never reboots the dongle or costs a fix: that part stands.
 
 **2026-08-25 addendum — runtime USB Ethernet class (NCM / RNDIS).** The
 USB device class is now selected at RUNTIME from the new
@@ -61,13 +81,13 @@ class-independent.
 
 | Item | Value |
 |---|---|
-| Composite device (OTG) | **VID `0x303A` PID `0x4007`**, manufacturer `MeatPi Electronics`, product `ESPNetLink`; interfaces: CDC-NCM (0–1, data alt 1) + CDC-ACM console (2–3) |
+| Composite device (OTG) | **VID `0x303A` PID `0x4007`**, manufacturer `MeatPi Electronics`, product `ESPNetLink`; interfaces: RNDIS (default since 2026-10-12) or CDC-NCM (0 and 1, NCM data alt 1) + CDC-ACM console (2 and 3); in `usb_mode=console` the CDC-ACM console alone at 0 and 1 |
 | Dongle address on the link | `192.168.7.1/24`; the host gets `192.168.7.2/24` by DHCP — **address + netmask only, no router and no DNS** unless `ncm_share` is on. The WiCAN reaches the dongle by its subnet route; its own default route and resolvers are untouched. The DHCP server restarts on every bus reset/re-plug (fixed 2026-08-23). |
 | Time to enumerate after power-on | ~3 s (the firmware starts the OTG stack at ~3.4 s) |
 | Boot window gotcha | The S3's **USB-Serial-JTAG** (VID `0x303A` PID **`0x1001`**, a CDC-ACM) is on the pads only while the ROM/bootloader run (< 1.5 s after power-on) — the app detaches it at `app_main` start, then the OTG stack takes the PHY at ~3.4 s. Still: **never open / toggle DTR-RTS on 303A:1001** (its line sequence resets the chip); ignore that PID and wait for `0x4007`. |
 | After the cut | The dongle's DWC2 core raises no disconnect event (no VBUS sense) — it idles "configured" until the next bus reset. From the host side it is simply an unplug. |
 | Restore | `POST /api/wifi_modem/usb_data {"enabled":true}` over the AP, or the dongle's UART console (`wifi_modem -d 1`), or a VBUS power-cycle. A PC re-enumerated in ~12 s; a WiCAN host should see it within its normal enumeration time. |
-| NCM internet sharing | **Off by default** (`lte_upstream_pppos.ncm_share=false`): the USB DHCP offers no default router, so the link is a control channel only (192.168.7.1 reachable by subnet route) and a PC's internet never moves onto the LTE link; internet for the WiCAN comes over the AP. |
+| USB internet sharing | **On by default again since 2026-10-12** (`lte_upstream_pppos.ncm_share=true`): the USB DHCP offers the dongle as default router and resolver, NAPT into LTE, so a WiCAN in a USB mode has internet over the wire with nothing to change on the dongle (no restart at the first contact). Off = a control channel only (192.168.7.1 by subnet route); the dongle's web UI switches it per device. |
 
 ### 2.2 HTTP over USB (192.168.7.1) — all JSON
 
@@ -76,7 +96,7 @@ class-independent.
 | `GET /api/info` | `{"device_type":"espnetlink","model":"ESPNetLink","fw_version":"…","device_id":"206ef1894a5d","mac":"20:6E:F1:89:4A:5C","api_level":6}` — identify with `device_type`, key the pairing on `device_id` |
 | `GET /api/wifi_modem/credentials` | `{"ssid":"ESPNetLink_894A5D","password":"<12 chars>","device_id":"206ef1894a5d","ap_started":true}` — **200 only when the request arrived over USB** (local socket address is neither the AP nor STA address); **403 over WiFi**. The password is the dongle's per-device random key (provisioned on its first boot; `0/O/1/l/I` never appear). |
 | `POST /api/wifi_modem/usb_data` body `{"enabled":false}` | `{"usb_data":false,"applies_in_ms":500}` — the cut happens 500 ms after the response. `409 {"error":…}` when the dongle is in `usb_mode=ncm` (owner locked USB on — treat as "PC tethering mode", do not retry). `400` on a malformed body. |
-| `GET /api/wifi_modem` | health: `usb_mode`, `usb_data` (live state of the lines), `napt`, `ap{ssid,ip,started,clients}`, `lte{valid,sim,stage,attached,connected,rssi_dbm,operator,network_type,ip}`, `gps{valid,fix,satellites,age_ms}`, `uptime_s`, `device_id`, the same document over USB and over the AP. `sim` ("unknown" / "ready" / "missing" / "pin") and `stage` are there before the first LTE poll (api_level 8, 2026-10-07): the WiCAN reads them over the cable during the pairing pass for its Quick Setup checks; `ip` only while connected |
+| `GET /api/wifi_modem` | health: `usb_mode` (`auto` / `ncm` / `console`), `usb_data` (live state of the lines), `usb_ethernet` (the Ethernet function present; false in `console`; api_level 9, 2026-10-12, replaces `boot_cut`), `napt`, `ap{ssid,ip,started,clients}`, `lte{valid,sim,stage,attached,connected,rssi_dbm,operator,network_type,ip}`, `gps{valid,fix,satellites,age_ms}`, `uptime_s`, `device_id`, the same document over USB and over the AP. `sim` ("unknown" / "ready" / "missing" / "pin") and `stage` are there before the first LTE poll (api_level 8, 2026-10-07): the WiCAN reads them over the cable during the pairing pass for its Quick Setup checks; `ip` only while connected |
 | `GET /api/gps` | full fix (`latitude`, `longitude`, `altitude_m`, `speed_kmph`, `course_deg`, `satellites`, `hdop`, `fix_quality`, `age_ms`, …) — unchanged, this is what `espnetlink_link` already parses |
 
 ### 2.3 The AP

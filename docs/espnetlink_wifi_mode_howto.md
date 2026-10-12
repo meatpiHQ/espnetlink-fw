@@ -46,31 +46,33 @@ as NCM + CDC (USB data on), then:
      the USB device drop (expected) and joins the AP when it needs the
      uplink; GPS acquires undisturbed.
 
-Since 2026-08-24 the sequence above runs only when it has to: the host's
-cut arms the **`boot_cut` hint**, and every later boot in `usb_mode=auto`
-cuts the data lines at ~3 s — before the USB device stack starts — so a
-paired dongle boots straight into quiet-bus GPS acquisition and the WiCAN
-never touches USB again (it just joins the AP). The hint self-heals: no
-station on the AP within 60 s restores the lines and clears it (a PC gets
-tethering back one boot late; a WiCAN that needs a fresh key read gets
-its USB channel the same way, ~75 s worst case after a VBUS cycle). A
-runtime restore (`wifi_modem -d 1` / `POST /api/wifi_modem/usb_data
-{"enabled":true}`) clears it immediately. No other pairing state, nothing
-to un-pair, no reboot: a new or factory-reset WiCAN reads the key again
-whenever the USB link is up (first boot, after the self-restore, or a
-forced VBUS cycle). The first-pairing sequence costs ~5–10 s of USB link;
-repeat boots cost none.
+**Since 2026-10-12 the sequence above runs at EVERY dongle boot** and
+nothing about the cut persists: the dongle always starts with the data
+lines on (RNDIS by default, or NCM, plus the CDC console), the WiCAN
+identifies it, re-reads the key (unchanged: no restart) and cuts again,
+about 10 to 20 s after power-on; then the bus is quiet for the GPS. The
+boot-cut hint of 2026-08-24 (a cut at 3 s of every later boot with a 60 s
+self-restore) is gone: a user who forgot the AP password of such a dongle
+had no way in. A runtime restore (`wifi_modem -d 1` / `POST
+/api/wifi_modem/usb_data {"enabled":true}`) or simply the next boot brings
+the USB link back. No pairing state, nothing to un-pair: a new or
+factory-reset WiCAN reads the key again whenever the USB link is up.
 
-Manual overrides (settings PUT / `wifi_modem -u …` + reboot):
+Manual overrides (settings PUT / `wifi_modem -u ...` + reboot):
 `usb_mode=ncm` locks the data lines on (the cut is refused with 409);
-`usb_mode=power_only` cuts at boot (charger-powered, AP only).
+`usb_mode=console` is the charger-powered, AP-only mode: USB presents the
+CDC console ALONE (no USB Ethernet), so `wifi_modem -k` and `wifi_modem
+-u auto` are always one cable away (v1's `power_only` migrates to it).
 
-**The USB link is a control channel, not an internet path.**
-`lte_upstream_pppos.ncm_share` now defaults to `false` and the USB DHCP
-server offers **no default router** unless it is on — previously a PC on
-the dongle silently routed all its internet through the Cat-M1 link.
-`192.168.7.1` stays reachable by the subnet route (web UI, pairing API).
-Opt back in per device with `ncm_share=true` (NAT + router offer).
+**The USB link is an internet path again by default.**
+`lte_upstream_pppos.ncm_share` defaults to `true` since 2026-10-12: the
+USB DHCP server offers the dongle as default router and resolver and NAPT
+sends the host's traffic into LTE. This is what a WiCAN in its default
+`usb_rndis` mode needs, and a matching dongle default spares the dongle
+restart at the first contact. A PC on the dongle therefore routes its
+internet through the Cat-M1 link unless `ncm_share` is turned off per
+device (then `192.168.7.1` stays reachable by the subnet route: web UI,
+pairing API, and nothing else moves).
 
 ### 2.2 ESPNetLink checklist
 
@@ -115,11 +117,13 @@ device, no reboot.
 
 Firmware with the `espnetlink_link` component (meatpi-components). The
 zero-touch sequence of §2.1 is IMPLEMENTED there (2026-08-24,
-bench-verified: attach → identify → credentials → cut in ~2 s of USB
-link; the boot-cut steady state joins the AP with no USB contact at
-all). Nothing to configure — `espnetlink.enabled=true`,
-`mode=wifi_modem`, `auto_pair=true` are the defaults. The manual pairing
-path below still works when USB is not an option (key from
+bench-verified: attach, identify, credentials, cut in ~2 s of USB link;
+since 2026-10-12 it repeats at every dongle boot). The WiCAN's default
+`espnetlink.mode` is `usb_rndis` since 2026-10-12 (the dongle stays a USB
+LTE modem on the wire, GPS and health polled at 192.168.7.1); pick
+`wifi_modem` on the WiCAN for the cut-after-pairing flow of §2.1.
+`espnetlink.enabled=true` and `auto_pair=true` are the defaults. The
+manual pairing path below still works when USB is not an option (key from
 `wifi_modem -k`):
 
 - WiFi: mode `apsta`, primary STA = the home network; leave a fallback
@@ -150,8 +154,9 @@ path below still works when USB is not an option (key from
   `WCAT: 200`.
 - Dongle health from any AP client: `GET http://192.168.80.1/api/wifi_modem`.
 - Dongle status on its console: `wifi_modem` →
-  `usb_mode=power_only ap_share=1 napt=1 ap_ip=192.168.80.1 clients=1
-  upstream_dns=... mux SEL1=1 SEL2=1`.
+  `usb_mode=auto usb_data=0 usb_ethernet=1 ap_share=1 napt=1
+  ap_ip=192.168.80.1 clients=1 upstream_dns=... mux SEL1=1 SEL2=1`
+  (`usb_data=0` = cut by the host until the next boot).
 
 ### 2.5 Troubleshooting
 
@@ -231,9 +236,10 @@ Also fixed on the way: `refactor` HEAD (`e4c306d`) did not build —
 although `event_manager` is not part of the ESPNetLink composition (the
 files' own comments say they are excluded). Restored the SRCS lines.
 
-Differences from the sandbox MVP: `usb_mode` is `auto|ncm|power_only`
-(default `auto`: the host cuts the data lines at runtime — the zero-touch
-WiCAN flow; no pairing state on the dongle), `GET /api/wifi_modem/
+Differences from the sandbox MVP: `usb_mode` is `auto|ncm|console`
+(`auto|ncm|power_only` until 2026-10-12; default `auto`: the host cuts the
+data lines at runtime, the zero-touch WiCAN flow; no pairing state on the
+dongle), `GET /api/wifi_modem/
 credentials` (USB-only) + `POST /api/wifi_modem/usb_data`, the AP password
 is provisioned per device, `init/start/stop` lifecycle +
 `wifi_modem_settings_config()` getters, CLI in its own file with argtable

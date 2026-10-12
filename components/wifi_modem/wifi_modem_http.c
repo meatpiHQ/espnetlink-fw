@@ -9,11 +9,13 @@
  *                                     requests that did not arrive over WiFi
  *                                     (the USB link: point-to-point, the
  *                                     WiCAN pairing channel). 403 otherwise.
- *   POST /api/wifi_modem/usb_data     {"enabled":bool} — runtime USB data
+ *   POST /api/wifi_modem/usb_data     {"enabled":bool}: runtime USB data
  *                                     switch; answers first, applies
  *                                     USB_DATA_APPLY_DELAY_MS later so the
  *                                     response gets out over the very link
- *                                     that is about to be cut.
+ *                                     that is about to be cut. Nothing
+ *                                     persists: the next boot is USB on
+ *                                     (2026-10-12).
  */
 #include "wifi_modem.h"
 
@@ -230,7 +232,10 @@ static esp_err_t wifi_modem_get_handler(httpd_req_t *req)
 
     cJSON_AddStringToObject(o, "usb_mode", wmc_usb_mode_str(cfg->usb_mode));
     cJSON_AddBoolToObject(o, "usb_data", wifi_modem_usb_data_routed());
-    cJSON_AddBoolToObject(o, "boot_cut", wifi_modem_boot_cut_hint());
+    /* the USB Ethernet function is present (auto, ncm); false = the CDC
+     * console alone (usb_mode console), so a WiCAN polling this over the
+     * AP can say why the dongle never enumerates as a network device */
+    cJSON_AddBoolToObject(o, "usb_ethernet", wifi_modem_usb_ethernet_enabled());
     cJSON_AddBoolToObject(o, "ap_share", cfg->ap_share);
     cJSON_AddBoolToObject(o, "napt", wifi_modem_napt_active());
     add_ap(o);
@@ -373,10 +378,9 @@ static esp_err_t usb_data_post_handler(httpd_req_t *req)
                                    esp_err_to_name(err));
     }
 
-    /* the request IS the owner's intent: arm/clear the boot-cut hint here
-     * (httpd task = internal stack; the deferred apply runs on the
-     * esp_timer task, which must not touch the settings store) */
-    wifi_modem_hint_note(enable);
+    /* 2026-10-12: the request changes the lines until the next boot and
+     * nothing else; no hint, no settings write (a forgotten AP password
+     * must never leave a device that only answers over its own AP) */
 
     cJSON *o = cJSON_CreateObject();
 

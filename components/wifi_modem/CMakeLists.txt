@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS "wifi_modem.c"
          "wifi_modem_core.c"
+         "wifi_modem_migrate.c"
          "wifi_modem_settings.c"
          "wifi_modem_provision.c"
          "wifi_modem_dns.c"

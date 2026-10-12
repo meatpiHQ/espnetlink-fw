@@ -22,9 +22,17 @@ usb_dev_ethernet_class_t usb_dev_ethernet_class(void);
 
 esp_err_t usb_dev_ethernet_start(void);
 
-// Optional CDC-ACM console alongside RNDIS.
+// Optional CDC-ACM console alongside the Ethernet function.
 // Must be set before usb_dev_ethernet_start().
 void usb_dev_ethernet_set_console_enabled(bool enabled);
+
+// Whether the composite presents the USB Ethernet function at all
+// (default true). false = the CDC-ACM console ALONE at interfaces 0 and 1:
+// no NCM/RNDIS interfaces, no USB netif, no DHCP server, no DNS proxy
+// (wifi_modem usb_mode=console, 2026-10-12: the WiFi AP is the product and
+// the console is the owner's way back in). The console must be enabled in
+// that case. Must be set before usb_dev_ethernet_start().
+void usb_dev_ethernet_set_ethernet_enabled(bool enabled);
 
 // Whether the USB link's DHCP server offers this device as the host's
 // default ROUTER. Default false: the USB link is then a control channel

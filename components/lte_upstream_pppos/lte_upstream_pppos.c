@@ -493,7 +493,9 @@ esp_err_t lte_inner_start(const lte_upstream_pppos_config_t *cfg)
         cfg->reboot_wait_ms);
     if (err != ESP_OK)
     {
-        ESP_LOGE(TAG, "Cellular not attached: %s", esp_err_to_name(err));
+        /* §10: the supervisor retries this start; a W, not an E */
+        ESP_LOGW(TAG, "Cellular not attached: %s (will retry)",
+                 esp_err_to_name(err));
         lte_inner_stop();
         return err;
     }
@@ -507,7 +509,11 @@ esp_err_t lte_inner_start(const lte_upstream_pppos_config_t *cfg)
         err = esp_modem_set_mode(s_dce, ESP_MODEM_MODE_CMUX);
         if (err != ESP_OK)
         {
-            ESP_LOGE(TAG, "esp_modem_set_mode(CMUX) failed: %s", esp_err_to_name(err));
+            /* seen on every warm reset of the ESP with the modem left in
+             * CMUX (bench 2026-10-12); the supervisor retries the whole
+             * start, so this is a W per standard §10, not an E */
+            ESP_LOGW(TAG, "esp_modem_set_mode(CMUX) failed: %s (will retry)",
+                     esp_err_to_name(err));
             lte_inner_stop();
             return err;
         }

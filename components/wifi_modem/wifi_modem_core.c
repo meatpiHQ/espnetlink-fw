@@ -1,8 +1,9 @@
 /**
  * @file wifi_modem_core.c
- * @brief Pure helpers of wifi_modem — no IDF services, host-tested (§7):
- *        usb_mode string mapping, the AP password policy (stock check,
- *        generator, provisioning decision), resolver pick, IPv4 formatting.
+ * @brief Pure helpers of wifi_modem (no IDF services, host-tested, §7):
+ *        usb_mode string mapping, the USB presentation and runtime-switch
+ *        policies, the AP password policy (stock check, generator,
+ *        provisioning decision), resolver pick, IPv4 formatting.
  */
 #include "wifi_modem_private.h"
 
@@ -18,7 +19,7 @@ const char *wmc_usb_mode_str(wifi_modem_usb_mode_t mode)
         case WIFI_MODEM_USB_NCM:
             return "ncm";
         default:
-            return "power_only";
+            return "console";
     }
 }
 
@@ -41,22 +42,18 @@ bool wmc_usb_mode_parse(const char *s, wifi_modem_usb_mode_t *out)
         return true;
     }
 
-    if (strcmp(s, "power_only") == 0)
+    if (strcmp(s, "console") == 0)
     {
-        *out = WIFI_MODEM_USB_POWER_ONLY;
+        *out = WIFI_MODEM_USB_CONSOLE;
         return true;
     }
 
     return false;
 }
 
-bool wmc_boot_cut_route(wifi_modem_usb_mode_t mode, bool boot_cut_hint)
+bool wmc_usb_ethernet_present(wifi_modem_usb_mode_t mode)
 {
-    if (mode == WIFI_MODEM_USB_POWER_ONLY)
-    {
-        return true;
-    }
-    return mode == WIFI_MODEM_USB_AUTO && boot_cut_hint;
+    return mode != WIFI_MODEM_USB_CONSOLE;
 }
 
 bool wmc_usb_data_switchable(wifi_modem_usb_mode_t mode)
