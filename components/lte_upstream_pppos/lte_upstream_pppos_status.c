@@ -29,15 +29,61 @@
  */
 #include "lte_upstream_pppos.h"
 
+#include <stdlib.h>
+#include <string.h>
+
 const char *lte_upstream_pppos_sim_str(lte_sim_state_t s)
 {
     switch (s)
     {
-        case LTE_SIM_READY:   return "ready";
-        case LTE_SIM_MISSING: return "missing";
-        case LTE_SIM_PIN:     return "pin";
-        default:              return "unknown";
+        case LTE_SIM_READY:     return "ready";
+        case LTE_SIM_MISSING:   return "missing";
+        case LTE_SIM_PIN:       return "pin";
+        case LTE_SIM_PIN_WRONG: return "pin_wrong";
+        default:                return "unknown";
     }
+}
+
+bool lte_upstream_pppos_qpinc_remaining(const char *resp, int *pin_left,
+                                        int *puk_left)
+{
+    if (resp == NULL)
+    {
+        return false;
+    }
+
+    const char *p = strstr(resp, "+QPINC: \"SC\",");
+
+    if (p == NULL)
+    {
+        return false;
+    }
+    p += strlen("+QPINC: \"SC\",");
+
+    char *end = NULL;
+    long pin = strtol(p, &end, 10);
+
+    if (end == p || *end != ',')
+    {
+        return false;
+    }
+    p = end + 1;
+
+    long puk = strtol(p, &end, 10);
+
+    if (end == p || pin < 0 || puk < 0 || pin > 99 || puk > 99)
+    {
+        return false;
+    }
+    if (pin_left != NULL)
+    {
+        *pin_left = (int)pin;
+    }
+    if (puk_left != NULL)
+    {
+        *puk_left = (int)puk;
+    }
+    return true;
 }
 
 const char *lte_upstream_pppos_stage_from(bool started, bool connected,

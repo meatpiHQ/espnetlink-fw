@@ -97,12 +97,22 @@ typedef enum
     LTE_SIM_READY,         /* IMSI readable                             */
     LTE_SIM_MISSING,       /* no IMSI within the wait: absent or dead   */
     LTE_SIM_PIN,           /* the SIM wants a PIN this config lacks     */
+    LTE_SIM_PIN_WRONG,     /* the SIM refused the PIN this config holds:
+                              not retried until a new PIN is set
+                              (2026-10-13; three wrong tries lock the SIM) */
 } lte_sim_state_t;
 
 lte_sim_state_t lte_upstream_pppos_sim_state(void);
 
-/** "unknown" | "ready" | "missing" | "pin": the wire spelling (pure). */
+/** "unknown" | "ready" | "missing" | "pin" | "pin_wrong": the wire
+ *  spelling (pure). */
 const char *lte_upstream_pppos_sim_str(lte_sim_state_t s);
+
+/** Parse the modem's answer to AT+QPINC="SC" (`+QPINC: "SC",<pin left>,<puk
+ *  left>`, BG95): the tries the SIM still allows. Pure; false when the
+ *  answer carries no such line (the counters are then untouched). */
+bool lte_upstream_pppos_qpinc_remaining(const char *resp, int *pin_left,
+                                        int *puk_left);
 
 /** The bring-up stage as one word (pure; the `lte -j` console spelling):
  *  "not_started" | "connecting" | "connected" | "ppp_disconnected" |

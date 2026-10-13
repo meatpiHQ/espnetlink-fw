@@ -150,7 +150,9 @@ until the next boot); `usb_ethernet` says whether the USB Ethernet function
 is present at all (false in `console`, api_level 9). `lte` carries
 `valid:false` plus `sim` and `stage` until the monitor has polled once
 (2026-10-07: the SIM as the bring-up found it, "unknown" / "ready" /
-"missing" / "pin", and the bring-up stage in the `lte -j` spelling, so a
+"missing" / "pin" / "pin_wrong" (2026-10-13: the SIM refused the
+configured PIN, not retried until a new PIN is set), and the bring-up
+stage in the `lte -j` spelling, so a
 WiCAN reading this over the cable while pairing can say "SIM not found"
 before any attach); `rssi_dbm`/`operator`/`network_type` appear when
 known, `ip` while connected. The full fix is `GET /api/gps`; settings are

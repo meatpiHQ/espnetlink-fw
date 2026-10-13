@@ -29,6 +29,13 @@
 
 static const char *TAG = "lte_upstream_pppos"; /* §10: TAG == component dir */
 
+/* A PIN the SIM refused in this boot (2026-10-13): never entered again by
+ * itself, whatever the supervisor retries (three wrong tries lock the SIM
+ * behind its PUK). A new PIN arrives with a settings restart, which clears
+ * this. */
+static bool s_pin_rejected;
+static char s_rejected_pin[9];
+
 /* Wait until the SIM application is ready (AT+CIMI returns a valid IMSI).
  * On BG95 after a cold power-on the SIM stack needs ~2-5 s to initialise.
  * Without waiting, AT+CPIN? may still report READY but AT+CIMI fails and
@@ -88,24 +95,52 @@ esp_err_t wait_for_cellular_attach(esp_modem_dce_t *dce, uint32_t timeout_ms,
     const int64_t deadline = esp_timer_get_time() / 1000 + timeout_ms;
     if (pin_known && !pin_ok)
     {
-        if (pin && pin[0] != '\0')
+        if (pin == NULL || pin[0] == '\0')
         {
-            ESP_LOGI(TAG, "SIM PIN required – entering PIN");
-            esp_err_t perr = esp_modem_set_pin(dce, (char *)pin);
-            if (perr != ESP_OK)
-            {
-                ESP_LOGE(TAG, "SIM PIN entry failed: %s", esp_err_to_name(perr));
-                return perr;
-            }
-            /* Give the modem a moment to verify the PIN and unlock */
-            vTaskDelay(pdMS_TO_TICKS(3000));
-            lte_sim_note(LTE_SIM_READY);
-        }
-        else
-        {
-            ESP_LOGE(TAG, "SIM PIN required but no PIN configured");
+            /* §10: the user's next step (the WiCAN relays a PIN from its own
+             * settings), not a fault; the supervisor's retries repeat it */
+            ESP_LOGW(TAG, "SIM PIN required but no PIN configured");
             return ESP_ERR_INVALID_STATE;
         }
+        if (s_pin_rejected && strcmp(s_rejected_pin, pin) == 0)
+        {
+            ESP_LOGW(TAG, "SIM PIN required: the configured PIN was rejected "
+                     "earlier this boot, not retrying it");
+            lte_sim_note(LTE_SIM_PIN_WRONG);
+            return ESP_ERR_INVALID_STATE;
+        }
+
+        ESP_LOGI(TAG, "SIM PIN required: entering the configured PIN");
+
+        esp_err_t perr = esp_modem_set_pin(dce, (char *)pin);
+
+        /* the modem needs a moment to verify the PIN and unlock */
+        vTaskDelay(pdMS_TO_TICKS(3000));
+
+        bool ok_now = true;
+        bool known_now = esp_modem_read_pin(dce, &ok_now) == ESP_OK;
+
+        if (perr != ESP_OK || (known_now && !ok_now))
+        {
+            int pin_left = -1;
+            int puk_left = -1;
+            char buf[64] = {0};
+
+            if (esp_modem_at(dce, "AT+QPINC=\"SC\"", buf, 2000) == ESP_OK)
+            {
+                (void)lte_upstream_pppos_qpinc_remaining(buf, &pin_left,
+                                                         &puk_left);
+            }
+            ESP_LOGW(TAG, "SIM PIN rejected (%s): %d PIN tries left, %d PUK "
+                     "tries; not retried until a new PIN is set",
+                     esp_err_to_name(perr), pin_left, puk_left);
+            s_pin_rejected = true;
+            strncpy(s_rejected_pin, pin, sizeof(s_rejected_pin) - 1);
+            s_rejected_pin[sizeof(s_rejected_pin) - 1] = '\0';
+            lte_sim_note(LTE_SIM_PIN_WRONG);
+            return perr != ESP_OK ? perr : ESP_ERR_INVALID_STATE;
+        }
+        lte_sim_note(LTE_SIM_READY);
     }
 
     /* ---- Check if modem is already registered before touching radio config ---- */

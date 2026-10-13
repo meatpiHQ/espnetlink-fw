@@ -20,7 +20,8 @@ Operation:
 
 - `lte_upstream_pppos_wait_for_ip(timeout_ms)` — block until PPP GOT_IP.
 - `lte_upstream_pppos_get_status(out)`: thread-safe status snapshot (spinlock-protected).
-- `lte_upstream_pppos_sim_state(void)` / `lte_upstream_pppos_sim_str(s)` (2026-10-07): the SIM as the last bring-up found it (`LTE_SIM_UNKNOWN` / `READY` / `MISSING` / `PIN`; the AT+CIMI wait says ready, the PIN read tells pin from missing) and its wire spelling ("unknown" / "ready" / "missing" / "pin"). Kept outside the status struct, so it survives the failed attach a missing SIM causes: `GET /api/lte`, the `/api/wifi_modem` health and `lte -j` show it before any attach (the WiCAN's Quick Setup reads it over the cable while pairing).
+- `lte_upstream_pppos_sim_state(void)` / `lte_upstream_pppos_sim_str(s)` (2026-10-07): the SIM as the last bring-up found it (`LTE_SIM_UNKNOWN` / `READY` / `MISSING` / `PIN` / `PIN_WRONG`; the AT+CIMI wait says ready, the PIN read tells pin from missing, a refused PIN entry says pin_wrong and is not retried until a new PIN is set: 2026-10-13, three wrong tries lock the SIM) and its wire spelling ("unknown" / "ready" / "missing" / "pin" / "pin_wrong").
+- `lte_upstream_pppos_qpinc_remaining(resp, *pin_left, *puk_left)` (2026-10-13): the tries the SIM still allows, parsed from the modem's `AT+QPINC="SC"` answer (pure, host-tested); logged with every rejection. Kept outside the status struct, so it survives the failed attach a missing SIM causes: `GET /api/lte`, the `/api/wifi_modem` health and `lte -j` show it before any attach (the WiCAN's Quick Setup reads it over the cable while pairing).
 - `lte_upstream_pppos_stage_from(started, connected, disconnected, detached)` / `lte_upstream_pppos_stage_str(void)`: the bring-up stage in the `lte -j` spelling ("not_started" / "connecting" / "connected" / "ppp_disconnected" / "network_detached"), pure from the bits and live from the event group; one source for the console and both HTTP documents (`lte_upstream_pppos_status.c`, host-tested).
 - `lte_upstream_pppos_send_at(cmd, resp, resp_len, timeout_ms)`: raw AT command (requires CMUX).
 - `lte_upstream_pppos_is_time_synced(void)` / `lte_upstream_pppos_mark_time_synced(void)` — modem time-sync state.
@@ -48,7 +49,7 @@ Descriptor `"lte_upstream_pppos"`, version 1 (`lte_upstream_pppos_settings.c`):
 | `apn` | str ≤63 | `"internet"` | APN |
 | `apn_user` | str ≤32 | `""` | APN username |
 | `apn_password` | str ≤32 | `""` | APN password |
-| `apn_pin` | str ≤8 | `""` | SIM PIN (empty = no PIN lock) |
+| `apn_pin` | str ≤8 | `""` | SIM PIN (empty = none). Entered once per boot when the SIM asks; a PIN the SIM refuses is reported as `sim: "pin_wrong"` and never entered again until a new one is set (2026-10-13). The WiCAN relays its own `espnetlink.sim_pin` here over the cable. |
 | `ncm_share` | bool | `true` | share the uplink over the USB Ethernet link (NAT + DNS + default-router offer). On by default again since 2026-10-12: the dongle starts as a USB LTE modem and the WiCAN pairs in usb_rndis mode by default, so a matching default spares the dongle restart at the first contact; a PC on the cable gets its default route over LTE with it (turn it off per device to keep USB a control channel). It was off from 2026-08-23 to 2026-10-12 |
 | `cli` | bool | `true` | register the `lte` console command (§6b) |
 

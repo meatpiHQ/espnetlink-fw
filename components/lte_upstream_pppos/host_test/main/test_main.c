@@ -191,7 +191,33 @@ void test_sim_state_spellings(void)
     TEST_ASSERT_EQUAL_STRING("ready", lte_upstream_pppos_sim_str(LTE_SIM_READY));
     TEST_ASSERT_EQUAL_STRING("missing", lte_upstream_pppos_sim_str(LTE_SIM_MISSING));
     TEST_ASSERT_EQUAL_STRING("pin", lte_upstream_pppos_sim_str(LTE_SIM_PIN));
+    TEST_ASSERT_EQUAL_STRING("pin_wrong", lte_upstream_pppos_sim_str(LTE_SIM_PIN_WRONG));
     TEST_ASSERT_EQUAL_STRING("unknown", lte_upstream_pppos_sim_str((lte_sim_state_t)99));
+}
+
+/* 2026-10-13: the tries the SIM still allows, from AT+QPINC="SC" */
+void test_qpinc_remaining(void)
+{
+    int pin = -1, puk = -1;
+
+    TEST_ASSERT_TRUE(lte_upstream_pppos_qpinc_remaining("\r\n+QPINC: \"SC\",2,10\r\n\r\nOK\r\n", &pin, &puk));
+    TEST_ASSERT_EQUAL(2, pin);
+    TEST_ASSERT_EQUAL(10, puk);
+    TEST_ASSERT_TRUE(lte_upstream_pppos_qpinc_remaining("+QPINC: \"SC\",0,9", &pin, &puk));
+    TEST_ASSERT_EQUAL(0, pin);
+    TEST_ASSERT_EQUAL(9, puk);
+    /* nulls for the counters the caller does not want */
+    TEST_ASSERT_TRUE(lte_upstream_pppos_qpinc_remaining("+QPINC: \"SC\",3,10", NULL, NULL));
+    /* not the SIM's counters, a short or odd answer: untouched */
+    pin = -1; puk = -1;
+    TEST_ASSERT_FALSE(lte_upstream_pppos_qpinc_remaining("+QPINC: \"P2\",3,10", &pin, &puk));
+    TEST_ASSERT_FALSE(lte_upstream_pppos_qpinc_remaining("+QPINC: \"SC\",", &pin, &puk));
+    TEST_ASSERT_FALSE(lte_upstream_pppos_qpinc_remaining("+QPINC: \"SC\",3", &pin, &puk));
+    TEST_ASSERT_FALSE(lte_upstream_pppos_qpinc_remaining("ERROR", &pin, &puk));
+    TEST_ASSERT_FALSE(lte_upstream_pppos_qpinc_remaining("", &pin, &puk));
+    TEST_ASSERT_FALSE(lte_upstream_pppos_qpinc_remaining(NULL, &pin, &puk));
+    TEST_ASSERT_EQUAL(-1, pin);
+    TEST_ASSERT_EQUAL(-1, puk);
 }
 
 /* The stage from the event bits, as the console always spelled it: not
@@ -216,6 +242,7 @@ void app_main(void)
     RUN_TEST(test_apn_length_limit_enforced);
     RUN_TEST(test_cli_gate_off_after_reboot);
     RUN_TEST(test_sim_state_spellings);
+    RUN_TEST(test_qpinc_remaining);
     RUN_TEST(test_stage_from_bits);
 
     exit(UNITY_END()); /* the CI verdict is this process's exit code */
