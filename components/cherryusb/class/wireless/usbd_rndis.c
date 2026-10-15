@@ -477,6 +477,18 @@ void rndis_bulk_out(uint8_t busid, uint8_t ep, uint32_t nbytes)
     (void)busid;
     (void)ep;
 
+#ifdef CONFIG_USBDEV_RNDIS_USING_LWIP
+    /* ESPNetLink 2026-10-16: an OUT completion can reach this handler before
+     * the class primed its first read (a warm reboot with the host's RNDIS
+     * link up left the controller with a transfer in flight; the next image
+     * crashed here in ISR context ~5 s after boot, LoadProhibited at 0,
+     * coredump-verified). Re-arm the read instead of dereferencing NULL. */
+    if (g_rndis_rx_data_buffer == NULL) {
+        usbd_rndis_start_read(g_rndis_rx_buffer, sizeof(g_rndis_rx_buffer));
+        return;
+    }
+#endif
+
     hdr = (rndis_data_packet_t *)g_rndis_rx_data_buffer;
     if ((hdr->MessageType != REMOTE_NDIS_PACKET_MSG) || (nbytes < hdr->MessageLength)) {
         usbd_rndis_start_read((uint8_t *)g_rndis_rx_data_buffer, g_rndis_rx_total_length);
