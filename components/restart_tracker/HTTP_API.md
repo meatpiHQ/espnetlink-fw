@@ -45,8 +45,10 @@ delivered as their `*_to_str` names, never raw numbers.
 
 - `boot_time`/`request_time` are unix seconds; `0` + `time_valid:false` means
   the wall clock wasn't set yet (pre-NTP boot).
-- `reason` values: `poweron, external, software, panic, deepsleep, brownout,
-  interrupt_wdt, task_wdt, wdt, sdio, unknown`.
+- `reason` values (the `esp_reset_reason_t` names, 2026-10-15): `poweron,
+  external, software, panic, interrupt_wdt, task_wdt, wdt, deepsleep,
+  brownout, sdio, usb, jtag, efuse, power_glitch, cpu_lockup, unknown`
+  (`invalid` for a value outside the enum).
 - After a power cycle the ring restarts (PSRAM `.noinit` is only warm-reset
   persistent); `boot_count` restarts at 1 — that is correct behavior, not loss.
 

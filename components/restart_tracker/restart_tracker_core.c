@@ -10,11 +10,19 @@
 #include <string.h>
 
 /* Reset-reason codes mirrored from esp_reset_reason_t (values are stable
- * IDF API). Kept as plain numbers so this file stays host-buildable. */
+ * IDF API: UNKNOWN 0, POWERON 1, EXT 2, SW 3, PANIC 4, INT_WDT 5, TASK_WDT 6,
+ * WDT 7, DEEPSLEEP 8, BROWNOUT 9, SDIO 10, USB 11, JTAG 12, EFUSE 13,
+ * PWR_GLITCH 14, CPU_LOCKUP 15). Kept as plain numbers so this file stays
+ * host-buildable. ESPNetLink port 2026-10-15: the WiCAN copy had DEEPSLEEP
+ * at 5 (that is INT_WDT) and a string table shifted the same way, so a
+ * deep-sleep wake counted as an unexpected "task_wdt" and an interrupt
+ * watchdog reset hid as "deepsleep"; USB and JTAG resets were "invalid". */
 #define RT_RST_POWERON   1U
 #define RT_RST_EXT       2U
 #define RT_RST_SW        3U
-#define RT_RST_DEEPSLEEP 5U
+#define RT_RST_DEEPSLEEP 8U
+#define RT_RST_USB       11U
+#define RT_RST_JTAG      12U
 
 /* CRC-32 (IEEE 802.3, poly 0xEDB88320) — same convention as the settings
  * codec; local so the core has zero deps. */
@@ -69,6 +77,9 @@ bool rt_reset_reason_is_unexpected(uint32_t reason)
         case RT_RST_EXT: /* EN-pin reset: flasher/reset button = deliberate */
         case RT_RST_SW:
         case RT_RST_DEEPSLEEP:
+        case RT_RST_USB:  /* USB-Serial-JTAG reset: esptool's hard reset after
+                             a native-USB flash (the production station) */
+        case RT_RST_JTAG: /* a debugger: deliberate like EN */
             return false;
         default:
             return true; /* panic, watchdogs, brownout, unknown */
@@ -155,12 +166,17 @@ const char *restart_tracker_reset_reason_to_str(uint32_t esp_reset_reason)
         case 2:  return "external";
         case 3:  return "software";
         case 4:  return "panic";
-        case 5:  return "deepsleep";  /* ESP_RST_DEEPSLEEP */
-        case 6:  return "brownout";   /* ESP_RST_BROWNOUT  */
-        case 7:  return "interrupt_wdt";
-        case 8:  return "task_wdt";
-        case 9:  return "wdt";
+        case 5:  return "interrupt_wdt"; /* ESP_RST_INT_WDT   */
+        case 6:  return "task_wdt";      /* ESP_RST_TASK_WDT  */
+        case 7:  return "wdt";           /* ESP_RST_WDT       */
+        case 8:  return "deepsleep";     /* ESP_RST_DEEPSLEEP */
+        case 9:  return "brownout";      /* ESP_RST_BROWNOUT  */
         case 10: return "sdio";
+        case 11: return "usb";           /* ESP_RST_USB       */
+        case 12: return "jtag";
+        case 13: return "efuse";
+        case 14: return "power_glitch";
+        case 15: return "cpu_lockup";
         default: return "invalid";
     }
 }

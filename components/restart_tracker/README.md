@@ -69,8 +69,16 @@ legacy `restart_tracker_http.c` was dropped; these routes replace it.
 
 - **Host (`host_test/`, 8 tests):** the pure core — garbage-memory detection,
   boot recording/counters, planned-intent consumed exactly once, unexpected
-  classification (panic/wdt yes; sw/poweron/deepsleep no; planned never),
-  ring wrap, CRC tamper, invalid-clock handling.
+  classification (panic/wdt/brownout yes; sw/poweron/external/deepsleep/
+  usb/jtag no; planned never), ring wrap, CRC tamper, invalid-clock
+  handling.
+- **ESPNetLink port, 2026-10-15:** the reset-reason table is aligned with
+  `esp_reset_reason_t` (the WiCAN copy had DEEPSLEEP at 5, which is
+  INT_WDT, and a string table shifted the same way: a deep-sleep wake was
+  an unexpected "task_wdt", an interrupt-watchdog reset hid as
+  "deepsleep"). USB-Serial-JTAG and JTAG resets count as deliberate, like
+  the EN pin: the production station's esptool hard reset after a
+  native-USB flash is one. WiCAN should take the same fix.
 - **On-target (`test_apps/`):** two-phase self-driving app across a **real
   esp_restart()** — proves `.noinit` survival, intent consumption, and
   software-reset classification on actual hardware. Main partition table per

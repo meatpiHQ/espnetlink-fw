@@ -8,10 +8,16 @@
 
 #include "restart_tracker_private.h"
 
-#define RST_POWERON 1U
-#define RST_SW      3U
-#define RST_PANIC   4U
-#define RST_TASKWDT 8U
+#define RST_POWERON   1U
+#define RST_EXT       2U
+#define RST_SW        3U
+#define RST_PANIC     4U
+#define RST_INTWDT    5U
+#define RST_TASKWDT   6U  /* esp_reset_reason_t: 8 is DEEPSLEEP, not a wdt */
+#define RST_DEEPSLEEP 8U
+#define RST_BROWNOUT  9U
+#define RST_USB       11U
+#define RST_JTAG      12U
 
 #define GOOD_TIME 1780000000LL /* well past the 2024 sanity floor */
 
@@ -110,6 +116,37 @@ void test_unexpected_reason_classification(void)
                     RESTART_TRACKER_SOURCE_OTA, 0);
     rt_record_boot(&s_state, &panic);
     TEST_ASSERT_EQUAL_UINT32(2, s_state.unexpected_reset_count);
+
+    /* deliberate external causes (2026-10-15): EN pin, a deep-sleep wake,
+     * the USB-Serial-JTAG reset esptool issues after a native-USB flash,
+     * a debugger. None of them is a fault. */
+    rt_inputs_t ext = in(RST_EXT, GOOD_TIME);
+    rt_inputs_t deepsleep = in(RST_DEEPSLEEP, GOOD_TIME);
+    rt_inputs_t usb = in(RST_USB, GOOD_TIME);
+    rt_inputs_t jtag = in(RST_JTAG, GOOD_TIME);
+
+    rt_record_boot(&s_state, &ext);
+    rt_record_boot(&s_state, &deepsleep);
+    rt_record_boot(&s_state, &usb);
+    rt_record_boot(&s_state, &jtag);
+    TEST_ASSERT_EQUAL_UINT32(2, s_state.unexpected_reset_count);
+
+    /* faults the old table hid: the interrupt watchdog (5, which the WiCAN
+     * copy took for deepsleep) and a brownout */
+    rt_inputs_t intwdt = in(RST_INTWDT, GOOD_TIME);
+    rt_inputs_t brownout = in(RST_BROWNOUT, GOOD_TIME);
+
+    rt_record_boot(&s_state, &intwdt);
+    rt_record_boot(&s_state, &brownout);
+    TEST_ASSERT_EQUAL_UINT32(4, s_state.unexpected_reset_count);
+
+    /* the names follow esp_reset_reason_t */
+    TEST_ASSERT_EQUAL_STRING("interrupt_wdt", restart_tracker_reset_reason_to_str(RST_INTWDT));
+    TEST_ASSERT_EQUAL_STRING("task_wdt", restart_tracker_reset_reason_to_str(RST_TASKWDT));
+    TEST_ASSERT_EQUAL_STRING("deepsleep", restart_tracker_reset_reason_to_str(RST_DEEPSLEEP));
+    TEST_ASSERT_EQUAL_STRING("brownout", restart_tracker_reset_reason_to_str(RST_BROWNOUT));
+    TEST_ASSERT_EQUAL_STRING("usb", restart_tracker_reset_reason_to_str(RST_USB));
+    TEST_ASSERT_EQUAL_STRING("invalid", restart_tracker_reset_reason_to_str(99U));
 }
 
 void test_history_ring_wraps(void)
