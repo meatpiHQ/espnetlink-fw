@@ -5,14 +5,14 @@
  *
  * Field names mirror the legacy config_manager keys (APN, LTE_ENABLED, ...);
  * main's one-time legacy import maps the old /storage/config.json values
- * onto this descriptor. `ncm_share` defaults to TRUE again since 2026-10-12:
- * the dongle starts as a USB LTE modem in every mode (the WiCAN pairs in
- * usb_rndis mode by default and needs the uplink shared over the wire), so
- * a matching default spares the dongle restart that the WiCAN's ensure
- * pass would otherwise cost at the first contact. A PC on the cable gets
- * its default route over LTE with it; turn it off per device (the dongle's
- * web UI) to keep the USB link a control channel. (2026-08-23 to
- * 2026-10-12 the default was false, for that PC case.)
+ * onto this descriptor. `ncm_share` defaults to FALSE (2026-10-15): a PC on
+ * the cable must never have its default route moved onto the Cat-M1 link
+ * (no SIM = no internet at all, a SIM = a slow one), and the production
+ * test station is such a PC. The WiCAN, which needs the uplink shared over
+ * the wire in its usb_rndis mode, turns it on itself during its
+ * ensure-share pass at the first contact (one dongle restart, the
+ * 2026-08-23 behaviour; from 2026-10-12 to 2026-10-15 the default was true
+ * to spare that restart).
  */
 #include <stdio.h>
 
@@ -30,7 +30,7 @@ static const settings_field_t FIELDS[] =
     SETTINGS_STR ("apn_user",     32, ""),       /* legacy APN_USER    */
     SETTINGS_STR ("apn_password", 32, ""),       /* legacy APN_PASS    */
     SETTINGS_STR ("apn_pin",       8, ""),       /* legacy APN_PIN     */
-    SETTINGS_BOOL("ncm_share", true),            /* legacy NCM_SHARE   */
+    SETTINGS_BOOL("ncm_share", false),           /* legacy NCM_SHARE   */
     SETTINGS_BOOL("cli",       true),
 };
 
@@ -71,7 +71,7 @@ static bool get_bool(const cJSON *obj, const char *key, bool fallback)
 static esp_err_t on_apply(const cJSON *settings)
 {
     s_cfg.enabled   = get_bool(settings, "enabled", true);
-    s_cfg.ncm_share = get_bool(settings, "ncm_share", true);
+    s_cfg.ncm_share = get_bool(settings, "ncm_share", false);
     s_cfg.cli       = get_bool(settings, "cli", true);
     copy_str(s_cfg.apn, sizeof(s_cfg.apn), settings, "apn");
     copy_str(s_cfg.apn_user, sizeof(s_cfg.apn_user), settings, "apn_user");

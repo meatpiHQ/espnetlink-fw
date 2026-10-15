@@ -57,7 +57,48 @@ static void psm_print_duration(int32_t secs)
     if (secs || (!h && !m)) printf("%ds", (int)secs);
 }
 
+static int cmd_lte_body(int argc, char **argv);
+
+/* `-j` and `-q` query the modem live: they run under the DCE lifetime lock
+ * so a supervisor restart cannot destroy the DCE underneath them
+ * (2026-10-16). Everything else reads cached state. */
 static int cmd_lte(int argc, char **argv)
+{
+#if CONFIG_PPP_SUPPORT
+    bool live = argc >= 2 &&
+                (strcmp(argv[1], "-j") == 0 || strcmp(argv[1], "-q") == 0);
+
+    if (live && !lte_dce_lock(2000))
+    {
+        if (strcmp(argv[1], "-j") == 0)
+        {
+            /* the engine is restarting or never started: still one JSON
+             * line for the tooling */
+            printf("{\"stage\":\"%s\",\"sim\":\"%s\",\"modem_available\":false,"
+                   "\"busy\":true}\n",
+                   lte_upstream_pppos_stage_str(),
+                   lte_upstream_pppos_sim_str(lte_upstream_pppos_sim_state()));
+            return 0;
+        }
+
+        printf("lte -q: modem busy (session restarting)\n");
+        return 1;
+    }
+
+    int ret = cmd_lte_body(argc, argv);
+
+    if (live)
+    {
+        lte_dce_unlock();
+    }
+
+    return ret;
+#else
+    return cmd_lte_body(argc, argv);
+#endif
+}
+
+static int cmd_lte_body(int argc, char **argv)
 {
     if (argc < 2)
     {
@@ -193,6 +234,25 @@ static int cmd_lte(int argc, char **argv)
             memset(resp, 0, sizeof(resp));
             if (esp_modem_at(s_dce, "AT+QGMR", resp, 2000) == ESP_OK && resp[0])
                 cJSON_AddStringToObject(root, "modem_fw", resp);
+
+            /* Supply voltage at the modem's VBAT pins (the TPS62088 rail)
+             * and the hottest modem sensor: the production test's only
+             * rail reading without a probe (2026-10-14) */
+            memset(resp, 0, sizeof(resp));
+            if (esp_modem_at(s_dce, "AT+CBC", resp, 2000) == ESP_OK)
+            {
+                int mv = 0;
+                if (lte_upstream_pppos_cbc_mv(resp, &mv))
+                    cJSON_AddNumberToObject(root, "vbat_mv", mv);
+            }
+
+            memset(resp, 0, sizeof(resp));
+            if (esp_modem_at(s_dce, "AT+QTEMP", resp, 2000) == ESP_OK)
+            {
+                int temp_c = 0;
+                if (lte_upstream_pppos_qtemp_c(resp, &temp_c))
+                    cJSON_AddNumberToObject(root, "modem_temp_c", temp_c);
+            }
 
             /* SIM PIN status */
             memset(resp, 0, sizeof(resp));

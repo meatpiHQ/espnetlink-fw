@@ -114,6 +114,19 @@ const char *lte_upstream_pppos_sim_str(lte_sim_state_t s);
 bool lte_upstream_pppos_qpinc_remaining(const char *resp, int *pin_left,
                                         int *puk_left);
 
+/** Parse the modem's answer to AT+CBC (`+CBC: <bcs>,<bcl>,<voltage mV>`,
+ *  BG95): the supply voltage at the module's VBAT pins, the only reading
+ *  of the TPS62088 rail without a probe (the production test, 2026-10-14;
+ *  `lte -j` carries it as `vbat_mv`). Pure; false when the answer carries
+ *  no plausible voltage. */
+bool lte_upstream_pppos_cbc_mv(const char *resp, int *mv);
+
+/** Parse the modem's answer to AT+QTEMP: the hottest value it lists (the
+ *  BG96 spelling `+QTEMP: <pmic>,<xo>,<pa>` and the BG95 one, one
+ *  `+QTEMP: "<sensor>","<deg C>"` line per sensor; `lte -j` carries it as
+ *  `modem_temp_c`). Pure; false when no temperature is present. */
+bool lte_upstream_pppos_qtemp_c(const char *resp, int *temp_c);
+
 /** The bring-up stage as one word (pure; the `lte -j` console spelling):
  *  "not_started" | "connecting" | "connected" | "ppp_disconnected" |
  *  "network_detached". */

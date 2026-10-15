@@ -54,6 +54,13 @@ void lte_inner_stop(void);
  * attach wait in _at.c reports it; GET /api/lte and the health show it) */
 void lte_sim_note(lte_sim_state_t s);
 
+/* lte_upstream_pppos.c: the DCE lifetime lock. Hold it around any use of
+ * s_dce from outside the engine's own tasks (console commands, send_at);
+ * lte_inner_stop holds it while it destroys the DCE. false = busy, or the
+ * engine never started (then there is no DCE either). Recursive. */
+bool lte_dce_lock(uint32_t timeout_ms);
+void lte_dce_unlock(void);
+
 /* lte_upstream_pppos_at.c: SIM readiness + attach/registration wait */
 esp_err_t wait_for_cellular_attach(esp_modem_dce_t *dce, uint32_t timeout_ms,
                                    const char *pin,

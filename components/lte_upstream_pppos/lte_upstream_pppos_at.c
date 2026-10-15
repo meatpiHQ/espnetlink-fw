@@ -352,15 +352,22 @@ esp_err_t lte_upstream_pppos_send_at(const char *cmd, char *resp,
     (void)cmd; (void)resp; (void)resp_len; (void)timeout_ms;
     return ESP_ERR_NOT_SUPPORTED;
 #else
-    if (!s_dce)
-    {
-        return ESP_ERR_INVALID_STATE;
-    }
     if (!resp || resp_len == 0)
     {
         return ESP_ERR_INVALID_ARG;
     }
     resp[0] = '\0';
-    return esp_modem_at(s_dce, cmd, resp, timeout_ms);
+
+    /* the DCE lifetime lock: the supervisor may be restarting the session */
+    if (!lte_dce_lock(timeout_ms + 500))
+    {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t err = s_dce ? esp_modem_at(s_dce, cmd, resp, timeout_ms)
+                          : ESP_ERR_INVALID_STATE;
+
+    lte_dce_unlock();
+    return err;
 #endif
 }

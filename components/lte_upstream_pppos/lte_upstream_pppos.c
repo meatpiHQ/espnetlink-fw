@@ -4,6 +4,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "freertos/portmacro.h"
 
@@ -49,6 +50,36 @@ TaskHandle_t s_monitor_task;
 
 portMUX_TYPE s_status_mux = portMUX_INITIALIZER_UNLOCKED;
 lte_status_t s_status;   /* protected by s_status_mux */
+
+/* DCE lifetime lock (2026-10-16): the console's `lte -j` / `lte -q` and
+ * lte_upstream_pppos_send_at() use s_dce from other tasks while the
+ * supervisor may be restarting the session; lte_inner_stop holds it across
+ * esp_modem_destroy. Recursive, created on the first start, lives forever.
+ * Before it, a station polling `lte -j` through a supervisor restart died
+ * in esp_modem's own lock (use after free, coredump-verified). */
+static SemaphoreHandle_t s_dce_lock;
+static StaticSemaphore_t s_dce_lock_buf; /* internal: FreeRTOS object */
+
+bool lte_dce_lock(uint32_t timeout_ms)
+{
+    if (s_dce_lock == NULL)
+    {
+        return false; /* the engine never started: no DCE to protect */
+    }
+
+    TickType_t ticks = (timeout_ms == UINT32_MAX) ? portMAX_DELAY
+                                                  : pdMS_TO_TICKS(timeout_ms);
+
+    return xSemaphoreTakeRecursive(s_dce_lock, ticks) == pdTRUE;
+}
+
+void lte_dce_unlock(void)
+{
+    if (s_dce_lock != NULL)
+    {
+        (void)xSemaphoreGiveRecursive(s_dce_lock);
+    }
+}
 /* the SIM as the last bring-up found it; survives a failed attach (the
  * status struct is zeroed on stop, this is what "no SIM" has to show) */
 static volatile lte_sim_state_t s_sim_state = LTE_SIM_UNKNOWN;
@@ -277,8 +308,21 @@ void lte_inner_stop(void)
 
     if (s_dce)
     {
+        /* Nobody may be inside the DCE while it dies. A console `lte -j`
+         * holds the lock for its AT queries, and while the stack is
+         * attaching those wait behind the attach loop on esp_modem's own
+         * lock: a minute is possible. A 30 s fallback that destroyed the
+         * DCE anyway reproduced the use-after-free (panic 2026-10-16), so
+         * this waits for as long as it takes; every holder is bounded. */
+        bool locked = lte_dce_lock(UINT32_MAX);
+
         esp_modem_destroy(s_dce);
         s_dce = NULL;
+
+        if (locked)
+        {
+            lte_dce_unlock();
+        }
     }
     if (s_netif_ppp)
     {
@@ -581,6 +625,11 @@ esp_err_t lte_upstream_pppos_start(const lte_upstream_pppos_config_t *cfg)
     s_stop_requested = false;
     s_start_in_progress = true;
     lte_save_config(cfg);
+
+    if (s_dce_lock == NULL)
+    {
+        s_dce_lock = xSemaphoreCreateRecursiveMutexStatic(&s_dce_lock_buf);
+    }
 
     /* Configure LED_RED_PIN as output, start with LED off (active-low) */
     gpio_reset_pin(LED_RED_PIN);

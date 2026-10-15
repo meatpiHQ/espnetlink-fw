@@ -2,9 +2,11 @@
  * @file test_main.c
  * @brief Host tests for the "lte_upstream_pppos" settings descriptor
  *        (lte_upstream_pppos_settings.c) against the real settings_manager
- *        registry with the in-memory storage stub — schema defaults
- *        (including the ncm_share=false PRODUCT default), string length
- *        limits, reboot-to-apply semantics, and the §6b `cli` gate.
+ *        registry with the in-memory storage stub: schema defaults
+ *        (including the ncm_share PRODUCT default), string length
+ *        limits, reboot-to-apply semantics, and the §6b `cli` gate. Also
+ *        the pure AT answer parsers of lte_upstream_pppos_status.c (QPINC,
+ *        and since 2026-10-14 the production test's CBC and QTEMP).
  */
 #include <stdlib.h>
 #include <string.h>
@@ -79,13 +81,13 @@ static esp_err_t persist_bool(const char *field, bool val)
     return err;
 }
 
-/* Fresh device: schema defaults persist and apply. ncm_share defaults TRUE
- * again since 2026-10-12: the dongle starts as a USB LTE modem in every
- * mode and the WiCAN pairs in usb_rndis mode by default, so a matching
- * default spares the dongle restart at the first contact (it was false from
- * 2026-08-23, when the USB link was a control channel only). If this
- * assertion ever fails, someone changed the product behavior, not a test
- * detail. */
+/* Fresh device: schema defaults persist and apply. ncm_share defaults FALSE
+ * (2026-10-15): a PC on the cable must never have its internet moved onto
+ * the LTE link (the production test station is such a PC); the WiCAN turns
+ * sharing on itself during its ensure-share pass at the first contact (one
+ * dongle restart). It was true from 2026-10-12 to 2026-10-15 to spare that
+ * restart. If this assertion ever fails, someone changed the product
+ * behavior, not a test detail. */
 void test_defaults_applied_and_cli_registered(void)
 {
     fixture_reset();
@@ -100,7 +102,7 @@ void test_defaults_applied_and_cli_registered(void)
     TEST_ASSERT_EQUAL_STRING("", cfg->apn_user);
     TEST_ASSERT_EQUAL_STRING("", cfg->apn_password);
     TEST_ASSERT_EQUAL_STRING("", cfg->apn_pin);
-    TEST_ASSERT_TRUE(cfg->ncm_share);
+    TEST_ASSERT_FALSE(cfg->ncm_share);
     TEST_ASSERT_TRUE(cfg->cli);
     TEST_ASSERT_EQUAL(1, s_cli_registrations);
 }
@@ -220,6 +222,51 @@ void test_qpinc_remaining(void)
     TEST_ASSERT_EQUAL(-1, puk);
 }
 
+/* 2026-10-14, the production test: the VBAT rail as the modem measures it
+ * (AT+CBC), in the plain and the unit-suffixed spelling; a line with no
+ * voltage field is not a reading. */
+void test_cbc_mv(void)
+{
+    int mv = -1;
+
+    TEST_ASSERT_TRUE(lte_upstream_pppos_cbc_mv("\r\n+CBC: 0,0,3812\r\n\r\nOK\r\n", &mv));
+    TEST_ASSERT_EQUAL(3812, mv);
+    TEST_ASSERT_TRUE(lte_upstream_pppos_cbc_mv("+CBC: 0,0,3812mV", &mv));
+    TEST_ASSERT_EQUAL(3812, mv);
+    TEST_ASSERT_TRUE(lte_upstream_pppos_cbc_mv("+CBC: 0,100,4150", NULL));
+    mv = -1;
+    TEST_ASSERT_FALSE(lte_upstream_pppos_cbc_mv("+CBC: 0,0", &mv));
+    TEST_ASSERT_FALSE(lte_upstream_pppos_cbc_mv("+CBC: 0,0,", &mv));
+    TEST_ASSERT_FALSE(lte_upstream_pppos_cbc_mv("+CBC: ", &mv));
+    TEST_ASSERT_FALSE(lte_upstream_pppos_cbc_mv("ERROR", &mv));
+    TEST_ASSERT_FALSE(lte_upstream_pppos_cbc_mv("", &mv));
+    TEST_ASSERT_FALSE(lte_upstream_pppos_cbc_mv(NULL, &mv));
+    TEST_ASSERT_EQUAL(-1, mv);
+}
+
+/* The hottest modem sensor, in the BG96 and the BG95 spellings; sensor
+ * names carrying digits ("pa0") are not readings. */
+void test_qtemp_c(void)
+{
+    int t = -99;
+
+    TEST_ASSERT_TRUE(lte_upstream_pppos_qtemp_c("\r\n+QTEMP: 25,27,26\r\n\r\nOK\r\n", &t));
+    TEST_ASSERT_EQUAL(27, t);
+    TEST_ASSERT_TRUE(lte_upstream_pppos_qtemp_c(
+        "+QTEMP: \"qfe_wtr_pa0\",\"32\"\r\n+QTEMP: \"qfe_wtr0\",\"31\"\r\n"
+        "+QTEMP: \"aoss0-usr\",\"29\"\r\n+QTEMP: \"cpuss-0-usr\",\"30\"\r\n\r\nOK\r\n", &t));
+    TEST_ASSERT_EQUAL(32, t);
+    TEST_ASSERT_TRUE(lte_upstream_pppos_qtemp_c("+QTEMP: \"xo_therm\",\"-5\"", &t));
+    TEST_ASSERT_EQUAL(-5, t);
+    TEST_ASSERT_TRUE(lte_upstream_pppos_qtemp_c("+QTEMP: 25,27,26", NULL));
+    t = -99;
+    TEST_ASSERT_FALSE(lte_upstream_pppos_qtemp_c("+QTEMP: \"qfe_wtr_pa0\"", &t));
+    TEST_ASSERT_FALSE(lte_upstream_pppos_qtemp_c("ERROR", &t));
+    TEST_ASSERT_FALSE(lte_upstream_pppos_qtemp_c("", &t));
+    TEST_ASSERT_FALSE(lte_upstream_pppos_qtemp_c(NULL, &t));
+    TEST_ASSERT_EQUAL(-99, t);
+}
+
 /* The stage from the event bits, as the console always spelled it: not
  * started before the event group exists; connected wins unless the PPP
  * dropped; a drop beats a detach; otherwise it is still connecting. */
@@ -243,6 +290,8 @@ void app_main(void)
     RUN_TEST(test_cli_gate_off_after_reboot);
     RUN_TEST(test_sim_state_spellings);
     RUN_TEST(test_qpinc_remaining);
+    RUN_TEST(test_cbc_mv);
+    RUN_TEST(test_qtemp_c);
     RUN_TEST(test_stage_from_bits);
 
     exit(UNITY_END()); /* the CI verdict is this process's exit code */

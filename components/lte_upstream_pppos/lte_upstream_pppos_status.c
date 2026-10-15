@@ -26,6 +26,8 @@
  *        (no IDF), host-tested, shared by `GET /api/lte`, the
  *        `/api/wifi_modem` health and the `lte -j` console so the three
  *        never drift (2026-10-07, for the WiCAN's Quick Setup checks).
+ *        Also the pure parsers of the modem's AT+QPINC, AT+CBC and AT+QTEMP
+ *        answers (2026-10-13/14; the last two feed the production test).
  */
 #include "lte_upstream_pppos.h"
 
@@ -106,4 +108,131 @@ const char *lte_upstream_pppos_stage_from(bool started, bool connected,
         return "network_detached";
     }
     return "connecting";
+}
+
+/* The modem's answer to AT+CBC: `+CBC: <bcs>,<bcl>,<voltage>`; the voltage
+ * (mV) is the LAST integer on the line, a unit suffix ("mV") may follow. */
+bool lte_upstream_pppos_cbc_mv(const char *resp, int *mv)
+{
+    if (resp == NULL)
+    {
+        return false;
+    }
+
+    const char *p = strstr(resp, "+CBC:");
+
+    if (p == NULL)
+    {
+        return false;
+    }
+    p += strlen("+CBC:");
+
+    long value = -1;
+
+    while (*p != '\0' && *p != '\r' && *p != '\n')
+    {
+        while (*p == ' ' || *p == ',')
+        {
+            p++;
+        }
+
+        char *end = NULL;
+        long v = strtol(p, &end, 10);
+
+        if (end == p)
+        {
+            break;
+        }
+        value = v;
+        p = end;
+
+        if (*p != ',' && *p != ' ')
+        {
+            break; /* end of line, or a unit suffix */
+        }
+    }
+
+    /* a modem runs between 3.3 and 4.3 V; anything else is not a reading */
+    if (value < 1000 || value > 60000)
+    {
+        return false;
+    }
+    if (mv != NULL)
+    {
+        *mv = (int)value;
+    }
+    return true;
+}
+
+/* The modem's answer to AT+QTEMP, in either spelling: every pure-integer
+ * field after "+QTEMP:" (quoted or not) is a temperature, sensor names
+ * such as "qfe_wtr_pa0" are not integers and fall out; the hottest wins. */
+bool lte_upstream_pppos_qtemp_c(const char *resp, int *temp_c)
+{
+    if (resp == NULL)
+    {
+        return false;
+    }
+
+    const char *p = strstr(resp, "+QTEMP:");
+
+    if (p == NULL)
+    {
+        return false;
+    }
+
+    bool found = false;
+    long best = 0;
+
+    while (*p != '\0')
+    {
+        while (*p == ' ' || *p == ',' || *p == '"' || *p == '\r' ||
+               *p == '\n' || *p == '\t')
+        {
+            p++;
+        }
+        if (*p == '\0')
+        {
+            break;
+        }
+
+        const char *tok = p;
+
+        while (*p != '\0' && *p != ' ' && *p != ',' && *p != '"' &&
+               *p != '\r' && *p != '\n' && *p != '\t')
+        {
+            p++;
+        }
+
+        size_t len = (size_t)(p - tok);
+        size_t i = (tok[0] == '-') ? 1 : 0;
+        bool is_int = (len > i);
+
+        for (size_t k = i; k < len && is_int; k++)
+        {
+            is_int = (tok[k] >= '0' && tok[k] <= '9');
+        }
+
+        if (is_int)
+        {
+            long v = strtol(tok, NULL, 10);
+
+            /* a sensor reading, not a counter: -40..125 C */
+            if (v >= -40 && v <= 125 && (!found || v > best))
+            {
+                best = v;
+                found = true;
+            }
+        }
+    }
+
+    if (!found)
+    {
+        return false;
+    }
+    if (temp_c != NULL)
+    {
+        *temp_c = (int)best;
+    }
+    return true;
 }
