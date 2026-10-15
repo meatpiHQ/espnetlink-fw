@@ -110,6 +110,16 @@ esp_err_t imu_manager_register_cli(void);
  *  (active HIGH -> EXT0 wake), drains latched statuses. */
 esp_err_t imu_manager_prepare_wom_wake(uint8_t threshold);
 
+/** ESPNetLink extension (imu_manager_selftest.c, the production test):
+ *  electrical check of the INT1 trace to IMU_INT_PIN without motion. The
+ *  pin is driven push-pull at both polarities with every interrupt source
+ *  unrouted, and IMU_INT_PIN is read each time against the opposite weak
+ *  pull. @p level_active_low / @p level_active_high (nullable) receive the
+ *  two readings (expected 1 then 0). ESP_OK when both match, ESP_FAIL when
+ *  the pin does not follow (open or shorted trace), ESP_ERR_INVALID_STATE
+ *  before the chip came up. The chip's registers are restored. */
+esp_err_t imu_manager_int1_check(int *level_active_low, int *level_active_high);
+
 #ifdef __cplusplus
 }
 #endif

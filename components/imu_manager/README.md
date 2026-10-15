@@ -63,6 +63,7 @@ apart.
 | `imu_manager_read_accel(x,y,z)` | g units (accel always on, LP mode). |
 | `imu_manager_read_temp(t)` | Die temperature °C. |
 | `imu_manager_device_id(*id)` | WHO_AM_I (0x67) — diagnostics. |
+| `imu_manager_int1_check(*low, *high)` | ESPNetLink extension (2026-10-14): electrical check of the INT1 trace, idle level at both polarities with no source routed, no motion needed; the production test. |
 
 ## Decided semantics
 
@@ -103,6 +104,8 @@ defaults. v1→v2 and v2→v3 both verified LIVE on the bench device.
   gate (host-tested, incl. clock wrap).
 - `imu_manager_settings.c` — PURE migrations (host-tested).
 - `icm42670/` — vendored driver (Apache-2.0, see PROVENANCE.md).
+- `imu_manager_wom.c`, `imu_manager_selftest.c`: ESPNetLink extensions (the
+  wake-on-motion deep-sleep arm; the production test's INT1 trace check).
 
 ## Memory
 

@@ -1,11 +1,12 @@
 idf_component_register(
-    SRCS "imu_manager.c"
+    SRCS "imu_manager_selftest.c" "imu_manager.c"
          "imu_manager_policy.c"
          "imu_manager_settings.c"
          "imu_manager_migrate.c"
          "imu_manager_http.c"
          "imu_manager_cli.c"
          "imu_manager_wom.c"
+         "imu_manager_selftest.c"
          "icm42670/icm42670.c"
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "." "icm42670"
@@ -18,7 +19,9 @@ idf_component_register(
     # is kept on disk but excluded from SRCS (its call sites in
     # imu_manager.c are no-ops — same pattern as dev_status_manager).
     # hw_config + esp_driver_gpio: the ESPNetLink WoM deep-sleep extension
-    # (imu_manager_wom.c) reads IMU_INT_PIN via gpio before EXT0 arm.
+    # (imu_manager_wom.c) reads IMU_INT_PIN via gpio before EXT0 arm, and
+    # imu_manager_selftest.c (the production test's INT1 trace check) drives
+    # the same pin's pulls.
     PRIV_REQUIRES i2c_bus esp_driver_i2c esp_timer http_server_manager
                   dev_status_manager settings_manager log_manager
                   cmdline_manager hw_config esp_driver_gpio
