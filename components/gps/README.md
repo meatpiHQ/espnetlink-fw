@@ -9,6 +9,7 @@ Lifecycle / registration:
 - `gps_init(bool enable_agnss)` — UART + parser task (idempotent); starts AGNSS in the background when enabled.
 - `gps_register_settings(void)` — register the `"gps"` descriptor (main: between settings init and start).
 - `gps_console_register(void)` / `agnss_console_register(void)` — register the `gps` / `agnss` CLI commands (called from the settings boot apply).
+- `gps_query_version(out, out_len, timeout_ms)` (2026-10-14): the module firmware version via `$PQTMVERNO`; the answer proves the ESP to module UART direction (the production test's `gps -V` and `factory selftest`). The parser task queues `$PQTM` answers next to the `$PAIR` ones for it.
 
 Fix and I/O:
 

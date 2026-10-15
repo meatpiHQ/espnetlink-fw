@@ -279,6 +279,73 @@ static esp_err_t pair_send_and_wait_ack(int cmd_id, const char *cmd_str,
 }
 
 /* -----------------------------------------------------------------------
+ * Module firmware version ($PQTMVERNO) - public, see gps.h
+ * ----------------------------------------------------------------------- */
+
+esp_err_t gps_query_version(char *out, size_t out_len, uint32_t timeout_ms)
+{
+    if (out == NULL || out_len < 8)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    out[0] = '\0';
+
+    esp_err_t lock_err = agnss_pair_lock_take(pdMS_TO_TICKS(timeout_ms + 250));
+    if (lock_err != ESP_OK)
+    {
+        return lock_err;
+    }
+
+    /* drop stale lines first: unsolicited $PAIR010 aiding requests (and the
+     * boot-time $PQTMVER) pile up in the 4-deep waiter queue while nobody
+     * listens, and a full queue would drop the answer */
+    char line[160];
+    while (gps_pair_response_wait(line, sizeof(line), 0) == ESP_OK)
+    {
+    }
+
+    char cmd[32];
+    agnss_build_pair_cmd(cmd, sizeof(cmd), "PQTMVERNO"); /* $PQTMVERNO*58 */
+
+    esp_err_t err = gps_uart_write(cmd, strlen(cmd));
+    if (err != ESP_OK)
+    {
+        agnss_pair_lock_give();
+        return err;
+    }
+
+    err = ESP_ERR_TIMEOUT;
+    int64_t deadline = esp_timer_get_time() / 1000 + timeout_ms;
+
+    while ((esp_timer_get_time() / 1000) < deadline)
+    {
+        uint32_t remaining = (uint32_t)(deadline - esp_timer_get_time() / 1000);
+        if (remaining == 0 ||
+            gps_pair_response_wait(line, sizeof(line), remaining) != ESP_OK)
+        {
+            break;
+        }
+
+        /* "$PQTMVERNO,<ver>,<date>,<time>*XX" */
+        if (strncmp(line, "$PQTMVERNO,", 11) == 0)
+        {
+            strlcpy(out, line + 11, out_len);
+
+            char *star = strchr(out, '*');
+            if (star != NULL)
+            {
+                *star = '\0';
+            }
+            err = ESP_OK;
+            break;
+        }
+    }
+
+    agnss_pair_lock_give();
+    return err;
+}
+
+/* -----------------------------------------------------------------------
  * Reference time injection (system clock → $PAIR590)
  * ----------------------------------------------------------------------- */
 

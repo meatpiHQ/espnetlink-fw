@@ -55,9 +55,9 @@ bool gps_is_functional(uint32_t timeout_ms);
 /**
  * Wait for a PAIR response line from the LC76G.
  *
- * The GPS parser task intercepts lines starting with "$PAIR" and routes
- * them to an internal queue.  This function blocks until a matching line
- * arrives or the timeout expires.
+ * The GPS parser task intercepts lines starting with "$PAIR" or "$PQTM"
+ * (query answers) and routes them to an internal queue.  This function
+ * blocks until a matching line arrives or the timeout expires.
  *
  * @param out       Buffer to receive the NUL-terminated line (incl. CRLF stripped).
  * @param out_len   Size of out buffer.
@@ -72,6 +72,16 @@ esp_err_t gps_pair_response_wait(char *out, size_t out_len, uint32_t timeout_ms)
  * so writes are serialised with the parser task.
  */
 esp_err_t gps_uart_write(const void *data, size_t len);
+
+/**
+ * Query the LC76G firmware version ($PQTMVERNO, the documented query; the
+ * module answers $PQTMVERNO,<version>,<build date>,<build time>). @p out
+ * receives the answer without the sentence name and the checksum, e.g.
+ * "LC76GABNR12A01S,2023/02/13,09:58:27". The answer proves the ESP to
+ * module UART direction (the production test's TX check, 2026-10-14) and
+ * records the GNSS firmware. ESP_ERR_TIMEOUT when nothing comes back.
+ */
+esp_err_t gps_query_version(char *out, size_t out_len, uint32_t timeout_ms);
 
 // Register the `gps` console command (idempotent).
 // This is called by usb_cli_console so new components can add commands.

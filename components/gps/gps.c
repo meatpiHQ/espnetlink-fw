@@ -196,7 +196,17 @@ esp_err_t gps_power_pin_set(bool enabled)
         return err;
     }
 
-    return gpio_set_level(GPS_PWR_EN_PIN, enabled ? 1 : 0);
+    err = gpio_set_level(GPS_PWR_EN_PIN, enabled ? 1 : 0);
+    if (err != ESP_OK)
+    {
+        return err;
+    }
+
+    /* reset follows the rail: held low while unpowered (no back-feed into
+     * the module through the reset pin), released once powered */
+    gpio_reset_pin(GPS_NRST_PIN);
+    gpio_set_direction(GPS_NRST_PIN, GPIO_MODE_OUTPUT);
+    return gpio_set_level(GPS_NRST_PIN, enabled ? 1 : 0);
 }
 
 bool gps_power_pin_is_enabled(void)
@@ -324,6 +334,14 @@ static esp_err_t gps_uart_setup_once(void)
         gpio_set_level(GPS_PWR_EN_PIN, 1);
     }
 
+    /* Release the module's reset line. The console sleep path asserts it
+     * (GPS_NRST low), and the GPIO state survives a software reset on the
+     * S3, so a `wake` reboot left the LC76G held in reset with no NMEA
+     * until a power cycle (bench 2026-10-16). Every boot releases it. */
+    gpio_reset_pin(GPS_NRST_PIN);
+    gpio_set_direction(GPS_NRST_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_level(GPS_NRST_PIN, 1);
+
     uart_config_t cfg = {
         .baud_rate = GPS_UART_BAUD_RATE,
         .data_bits = UART_DATA_8_BITS,
@@ -401,8 +419,11 @@ static void gps_parser_task(void *arg)
                     gps_uart0_write_sentence(sentence, sidx);
                 }
 
-                /* Intercept $PAIR responses and route to the queue */
-                if (strncmp(sentence, "$PAIR", 5) == 0)
+                /* Intercept $PAIR responses, and the $PQTM query answers
+                 * ($PQTMVERNO for gps_query_version, 2026-10-14), and route
+                 * them to the waiter queue */
+                if (strncmp(sentence, "$PAIR", 5) == 0 ||
+                    strncmp(sentence, "$PQTM", 5) == 0)
                 {
                     if (s_pair_queue)
                     {

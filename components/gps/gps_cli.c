@@ -23,7 +23,7 @@ static bool s_cmd_registered = false;
 
 static void gps_print_usage(void)
 {
-    printf("Usage: gps -p [-j] | gps -s | gps -t [0|1] | gps -U [0|1] | gps -c | gps -P [0|1]\n");
+    printf("Usage: gps -p [-j] | gps -s | gps -t [0|1] | gps -U [0|1] | gps -c | gps -P [0|1] | gps -V\n");
 }
 
 // Weak symbol implemented by usb_cli_console so GPS component can switch input mode.
@@ -133,6 +133,7 @@ static int cmd_gps(int argc, char **argv)
     bool opt_uart0 = false;
     bool opt_check = false;
     bool opt_power = false;
+    bool opt_version = false;
 
     for (int i = 1; i < argc; i++)
     {
@@ -176,11 +177,34 @@ static int cmd_gps(int argc, char **argv)
                 i++;
             }
         }
+        else if (strcmp(argv[i], "-V") == 0)
+        {
+            opt_version = true;
+        }
         else
         {
             gps_print_usage();
             return 1;
         }
+    }
+
+    if (opt_version)
+    {
+        /* the module's answer proves both UART directions and names the
+         * GNSS firmware (the production test records it) */
+        (void)gps_init(false);
+
+        char ver[128];
+        esp_err_t err = gps_query_version(ver, sizeof(ver), 3000);
+
+        if (err != ESP_OK)
+        {
+            printf("GPS version: %s\n", esp_err_to_name(err));
+            return 1;
+        }
+
+        printf("GPS version: %s\n", ver);
+        return 0;
     }
 
     if (opt_power)
@@ -366,7 +390,7 @@ void gps_console_register(void)
 
     const esp_console_cmd_t cmd = {
         .command = "gps",
-        .help = "GPS: -p [-j] print fix, -s stream NMEA, -t [0|1] USB passthrough, -U [0|1] route NMEA to UART0, -c check UART, -P [0|1] power",
+        .help = "GPS: -p [-j] print fix, -s stream NMEA, -t [0|1] USB passthrough, -U [0|1] route NMEA to UART0, -c check UART, -P [0|1] power, -V module firmware version",
         .hint = NULL,
         .func = &cmd_gps,
     };
