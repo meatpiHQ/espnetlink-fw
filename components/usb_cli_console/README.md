@@ -34,6 +34,6 @@ Descriptor `"usb_cli_console"`, version 1 (`usb_cli_console_settings.c`) — §6
 
 **All numbers estimated.**
 
-- Static (internal `.bss` — no `EXT_RAM_BSS_ATTR` here): OTA stream buffer 16 KB + OTA write chunk 4 KB (`usb_cli_ota.c`; consumed on the flash-writing console task), TX ring 2 KB, RX endpoint buffer 256 B, line buffer 128 B, TX in-flight chunk 64 B.
+- Static (internal `.bss` — no `EXT_RAM_BSS_ATTR` here): OTA stream buffer 16 KB + OTA write chunk 4 KB (`usb_cli_ota.c`; consumed on the flash-writing console task), TX ring 4 KB (2026-10-15, was 2 KB; a write waits up to 1 s for the host to drain the ring instead of dropping, so a ~2 KB `lte -j` arrives whole), RX endpoint buffer 256 B, line buffer 128 B, TX in-flight chunk 64 B.
 - Task stacks: `usb_cli` 6144, prio 8, pinned core 0, dynamic **internal** — required: the `ota` handler performs flash writes from this stack (§2 corollary).
 - Peak heap: not yet measured.

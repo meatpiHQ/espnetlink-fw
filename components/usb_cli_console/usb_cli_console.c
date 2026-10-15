@@ -70,9 +70,18 @@ static uint8_t s_busid = 0;
 static uint8_t s_escape_len = 0;
 static TickType_t s_escape_last_tick = 0;
 
-// TX ring buffer so printf/help output doesn't get dropped.
+// TX ring buffer so printf/help output doesn't get dropped. 4 KB since
+// 2026-10-15 (was 2 KB): a registered `lte -j` document alone is ~2 KB, and
+// the writer now waits for the host to drain the ring instead of dropping
+// (USB_CLI_TX_WAIT_MS), so long answers arrive whole.
 #ifndef USB_CLI_TX_BUF_SIZE
-#define USB_CLI_TX_BUF_SIZE 2048
+#define USB_CLI_TX_BUF_SIZE 4096
+#endif
+
+// How long one write may wait for ring space before it drops the rest: a
+// host that stopped reading must not wedge the writing task.
+#ifndef USB_CLI_TX_WAIT_MS
+#define USB_CLI_TX_WAIT_MS 1000
 #endif
 
 #ifndef USB_CLI_TX_CHUNK_SIZE
@@ -264,36 +273,70 @@ static void usb_cli_tx_enqueue_from_task(const void *data, size_t len)
         return;
     }
 
-    // Best-effort enqueue; drop overflow to avoid blocking.
     // Convert \n to \r\n for Windows terminals (but keep existing \r\n intact).
+    // When the ring is full, wait for the host to drain it (bounded by
+    // USB_CLI_TX_WAIT_MS) rather than dropping: a dropped middle turns a long
+    // JSON answer into garbage (2026-10-15, the production station's `lte -j`
+    // once the modem is registered). Callers in ISR context (the USB
+    // driver's echo path) cannot wait and keep the old best-effort behaviour.
     const uint8_t *bytes = (const uint8_t *)data;
-
-    portENTER_CRITICAL(&s_tx_mux);
-
+    const bool can_wait = !xPortInIsrContext();
+    const TickType_t deadline =
+        xTaskGetTickCount() + pdMS_TO_TICKS(USB_CLI_TX_WAIT_MS);
+    size_t i = 0;
     uint8_t prev = 0;
-    if (!usb_cli_tx_ring_is_empty())
-    {
-        // Best-effort: infer prev from last enqueued byte.
-        size_t last = (s_tx_head == 0) ? (USB_CLI_TX_BUF_SIZE - 1) : (s_tx_head - 1);
-        prev = s_tx_buf[last];
-    }
+    bool prev_known = false;
 
-    for (size_t i = 0; i < len; i++)
+    while (i < len)
     {
-        const uint8_t c = bytes[i];
+        portENTER_CRITICAL(&s_tx_mux);
 
-        if (c == '\n' && prev != '\r')
+        if (!prev_known)
         {
-            (void)usb_cli_tx_ring_push_unsafe((const uint8_t *)"\r", 1);
+            if (!usb_cli_tx_ring_is_empty())
+            {
+                // Best-effort: infer prev from last enqueued byte.
+                size_t last = (s_tx_head == 0) ? (USB_CLI_TX_BUF_SIZE - 1) : (s_tx_head - 1);
+                prev = s_tx_buf[last];
+            }
+            prev_known = true;
         }
 
-        (void)usb_cli_tx_ring_push_unsafe(&c, 1);
-        prev = c;
+        while (i < len)
+        {
+            const uint8_t c = bytes[i];
+            const size_t need = (c == '\n' && prev != '\r') ? 2 : 1;
+
+            if (usb_cli_tx_ring_free_unsafe() < need)
+            {
+                break;
+            }
+
+            if (need == 2)
+            {
+                (void)usb_cli_tx_ring_push_unsafe((const uint8_t *)"\r", 1);
+            }
+
+            (void)usb_cli_tx_ring_push_unsafe(&c, 1);
+            prev = c;
+            i++;
+        }
+
+        portEXIT_CRITICAL(&s_tx_mux);
+
+        usb_cli_tx_kick_from_any_context(s_busid);
+
+        if (i < len)
+        {
+            if (!can_wait || !s_configured || !s_dtr ||
+                xTaskGetTickCount() >= deadline)
+            {
+                break; // drop the rest: nobody draining, or out of time
+            }
+
+            vTaskDelay(1);
+        }
     }
-
-    portEXIT_CRITICAL(&s_tx_mux);
-
-    usb_cli_tx_kick_from_any_context(s_busid);
 }
 
 // Minimal VFS device so esp_console/help/printf output can go to CDC-ACM.
