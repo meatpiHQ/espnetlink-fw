@@ -109,7 +109,7 @@ behavior is bench-verified today; on-target pytest apps are the backlog.
 | dev_status_manager | ✅ | dev_status_manager_fmt.c formatting (ported) |
 | wifi_manager | ✅ | wifi_manager_select.c AP/STA selection (ported) |
 | gps | ✅ | Settings descriptor: defaults, agnss_cache_s range, reboot-to-apply, §6b cli gate. NMEA/AGNSS engine is UART/NVS-bound → bench + backlog |
-| lte_upstream_pppos | ✅ | Settings descriptor: defaults (incl. **ncm_share=true product default**), apn maxLength, reboot-to-apply, cli gate. PPP/CMUX engine is modem-bound → bench + backlog |
+| lte_upstream_pppos | ✅ | Settings descriptor: defaults (incl. **ncm_share=false product default**), apn maxLength, reboot-to-apply, cli gate. PPP/CMUX engine is modem-bound → bench + backlog |
 | modem_manager | ✅ | mm_parse_ifc/mm_parse_ipr AT-response parsers (extracted to modem_manager_parse.c). Power/probe ladder is UART-bound → bench + backlog |
 | api_http | ✅ | api_http_util.c: secret redact/unredact, /api/settings URI parse, level map. Handlers are esp_http_server-bound, verified on device over RNDIS |
 | imu_manager (replaces imu) | ✅ | WiCAN suite: policy state machine + settings migration (host) + on-device /api/imu + `imu` CLI bench-verified. WoM deep-sleep extension is hardware-bound |
