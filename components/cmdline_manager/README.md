@@ -35,7 +35,7 @@ byte-alike — outputs + `OK`/`ERROR` trailers on the `esp> ` console):
 | `help [cmd]` | cmdline_manager (the registry's own) |
 | `wifi` | wifi_manager (`wifi_manager_cli.c`, self-registered on settings apply) |
 | `version`, `status` | dev_status_manager (`dev_status_manager_cli.c`) |
-| `gps -p/-s/-t/-U/-c/-P` | gps (registered on the `gps` settings apply, `cli` gate) |
+| `gps -p/-s/-t/-U/-c/-P/-V` | gps (registered on the `gps` settings apply, `cli` gate) |
 | `agnss -s/-v/-e/-d/-i/-x` | gps (agnss_console.c, same `cli` gate) |
 | `lte -s/-r/-n/-p/-o/-i/-q/-j` | lte_upstream_pppos (registered on its settings apply, `cli` gate) |
 | `imu` | imu (registered on the `imu` {cli} settings apply) |
@@ -44,7 +44,8 @@ byte-alike — outputs + `OK`/`ERROR` trailers on the `esp> ` console):
 | `ota <size> [sha256]` | usb_cli_console (`usb_cli_ota.c` — firmware update over this console) |
 | `config list/get/set/reset` | **main/main_cli.c** — legacy-parity view over the settings_manager descriptors |
 | `ver`, `debug 0\|1`, `system -v/-i/-s`, `reboot`, `sleep 1..4`, `wake` | **main/main_cli_system.c** — composites spanning gps/imu/lte/usb/log |
-| `ping`, `speedtest` | **main/main_cli_net.c** — composites over the LTE uplink |
+| `ping`, `speedtest` | **main/main_cli_net.c**: composites over the LTE uplink |
+| `factory selftest/button/usbmux/led/mark/coredump/gpio/bootloader` | **main/main_cli_factory.c**: the production tester's device side (`tools/production/prodtest.py` drives it over the CDC console; every answer is one JSON line); `coredump` prints the stored panic summary, `gpio` dumps a pin, `bootloader` reboots into ROM download mode |
 
 `help` output follows the legacy format (`Available commands:` +
 `cmd - help` + indented `Usage:` hints + `Tip:`/`OK`; `help <cmd>` for
