@@ -31,8 +31,10 @@ forgot the AP password of a dongle that cut its USB at every boot had no
 way in. The dongle now boots with the USB data lines on in EVERY mode and
 enumerates as RNDIS (the new default class, matching the WiCAN's default
 `espnetlink.mode=usb_rndis`) or NCM plus the CDC console; `lte_upstream_
-pppos.ncm_share` defaults to true, so a fresh WiCAN in a USB mode needs
-no dongle restart at the first contact. A WiCAN in `wifi_modem` mode runs
+pppos.ncm_share` defaults to false again (2026-10-15: a PC on the cable
+must never have its internet moved onto LTE), so a fresh WiCAN in a USB
+mode flips it in its ensure-share pass, one dongle restart at the first
+contact. A WiCAN in `wifi_modem` mode runs
 the flow above at EVERY dongle boot (identify, key read, cut; an
 unchanged key costs it nothing) and the cut lasts until the next boot.
 `wifi_modem.usb_mode` is `auto` | `ncm` | `console` (settings v2; v1's
@@ -87,7 +89,7 @@ class-independent.
 | Boot window gotcha | The S3's **USB-Serial-JTAG** (VID `0x303A` PID **`0x1001`**, a CDC-ACM) is on the pads only while the ROM/bootloader run (< 1.5 s after power-on) — the app detaches it at `app_main` start, then the OTG stack takes the PHY at ~3.4 s. Still: **never open / toggle DTR-RTS on 303A:1001** (its line sequence resets the chip); ignore that PID and wait for `0x4007`. |
 | After the cut | The dongle's DWC2 core raises no disconnect event (no VBUS sense) — it idles "configured" until the next bus reset. From the host side it is simply an unplug. |
 | Restore | `POST /api/wifi_modem/usb_data {"enabled":true}` over the AP, or the dongle's UART console (`wifi_modem -d 1`), or a VBUS power-cycle. A PC re-enumerated in ~12 s; a WiCAN host should see it within its normal enumeration time. |
-| USB internet sharing | **On by default again since 2026-10-12** (`lte_upstream_pppos.ncm_share=true`): the USB DHCP offers the dongle as default router and resolver, NAPT into LTE, so a WiCAN in a USB mode has internet over the wire with nothing to change on the dongle (no restart at the first contact). Off = a control channel only (192.168.7.1 by subnet route); the dongle's web UI switches it per device. |
+| USB internet sharing | **Off by default** (`lte_upstream_pppos.ncm_share=false` since 2026-10-15; it was on from 2026-10-12): the USB DHCP offers address and netmask only, no router and no DNS, so a PC on the cable keeps its own internet and reaches 192.168.7.1 by the subnet route. A WiCAN in a USB mode turns it on through `PUT /api/settings/lte_upstream_pppos` plus submit in its ensure-share pass (one dongle restart at the first contact); on = the dongle offers itself as default router and resolver and NAPTs into LTE. The dongle's web UI switches it per device. |
 
 ### 2.2 HTTP over USB (192.168.7.1) — all JSON
 

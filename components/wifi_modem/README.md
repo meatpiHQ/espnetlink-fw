@@ -188,15 +188,15 @@ restore, and repeated cut/restore cycles were clean.
 ## WiCAN pairing (product flow, zero-touch)
 
 Ship state: `usb_mode=auto`, `usb_dev_ethernet.class=rndis`,
-`lte_upstream_pppos.ncm_share=true`, the per-device AP key already
-provisioned. Every time the dongle boots on a WiCAN's USB port it
+`lte_upstream_pppos.ncm_share=false` (since 2026-10-15: a PC on the cable
+keeps its own internet), the per-device AP key already provisioned. Every time the dongle boots on a WiCAN's USB port it
 enumerates as RNDIS (or NCM) + the CDC console with the data lines on,
 and the WiCAN decides from its own `espnetlink.mode`:
 
 - **`usb_rndis` / `usb_ncm` (the WiCAN's default is `usb_rndis`)**: the
   WiCAN identifies the dongle (`GET /api/info`), makes sure the class and
-  `ncm_share` match (nothing to change on a fresh dongle, so no restart),
-  and uses the wire: internet over LTE through the USB link, GPS and
+  `ncm_share` match (a fresh dongle ships with sharing off, so the first
+  contact costs one dongle restart), and uses the wire: internet over LTE through the USB link, GPS and
   health polled at 192.168.7.1. USB stays live, so the GNSS sees the host
   (cold fixes take longer: 86 to 110 s medians on the bench against 50 to
   66 s with the lines cut).
@@ -209,9 +209,9 @@ and the WiCAN decides from its own `espnetlink.mode`:
   quiet. A new or changed key costs the WiCAN one restart; an unchanged
   key costs nothing.
 
-A PC on the cable gets the web UI at 192.168.7.1 and the console; with
-`ncm_share` on (the default again since 2026-10-12) its default route moves
-onto the LTE link. Manual overrides: `wifi_modem -u ncm|console` (settings
+A PC on the cable gets the web UI at 192.168.7.1 and the console and keeps
+its own internet (`ncm_share` is off by default since 2026-10-15); with
+`ncm_share` on its default route moves onto the LTE link. Manual overrides: `wifi_modem -u ncm|console` (settings
 PUT + reboot); `wifi_modem -d 1` or `POST /api/wifi_modem/usb_data
 {"enabled":true}` restores the lines now.
 

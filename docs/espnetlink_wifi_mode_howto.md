@@ -64,15 +64,16 @@ Manual overrides (settings PUT / `wifi_modem -u ...` + reboot):
 CDC console ALONE (no USB Ethernet), so `wifi_modem -k` and `wifi_modem
 -u auto` are always one cable away (v1's `power_only` migrates to it).
 
-**The USB link is an internet path again by default.**
-`lte_upstream_pppos.ncm_share` defaults to `true` since 2026-10-12: the
-USB DHCP server offers the dongle as default router and resolver and NAPT
-sends the host's traffic into LTE. This is what a WiCAN in its default
-`usb_rndis` mode needs, and a matching dongle default spares the dongle
-restart at the first contact. A PC on the dongle therefore routes its
-internet through the Cat-M1 link unless `ncm_share` is turned off per
-device (then `192.168.7.1` stays reachable by the subnet route: web UI,
-pairing API, and nothing else moves).
+**The USB link is a control channel by default.**
+`lte_upstream_pppos.ncm_share` defaults to `false` since 2026-10-15 (it was
+`true` from 2026-10-12): the USB DHCP server offers address and netmask
+only, so a PC on the dongle keeps its own internet and `192.168.7.1` stays
+reachable by the subnet route (web UI, pairing API, console). A WiCAN in
+its default `usb_rndis` mode needs the uplink shared over the wire and
+turns `ncm_share` on itself in its ensure-share pass, at the cost of one
+dongle restart at the first contact; with it on, the DHCP offers the
+dongle as default router and resolver and NAPT sends the host's traffic
+into LTE.
 
 ### 2.2 ESPNetLink checklist
 
