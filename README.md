@@ -19,6 +19,7 @@
    - 2.5 [GPS](#25-gps)
    - 2.6 [AGNSS](#26-agnss)
    - 2.7 [Power / Sleep](#27-power--sleep)
+   - 2.8 [Production test](#28-production-test)
 
 > **Developers:** building from source, the dev-loop flash paths (CDC
 > OTA / HTTP OTA / UART recovery), monitoring, and on-target tests are
@@ -133,6 +134,9 @@ lte -q   Radio quality + PSM / eDRX power-saving state
 lte -j   All parameters as JSON
 ```
 
+`lte -j` also reports `vbat_mv` (the modem's supply voltage, AT+CBC) and
+`modem_temp_c` (AT+QTEMP) when the modem answers them.
+
 ### 2.5 GPS
 
 ```
@@ -140,6 +144,7 @@ gps -p [-j]    Print current fix (add -j for JSON output)
 gps -s         Stream raw NMEA sentences to the console
 gps -t [0|1]   Enable (1) or disable (0) NMEA passthrough mode
 gps -c         Check GPS UART health
+gps -V         Query the module firmware version ($PQTMVERNO)
 ```
 
 ### 2.6 AGNSS
@@ -170,4 +175,29 @@ sleep 4 [thresh]     Deep sleep: wake on IMU motion (Wake-on-Motion).
                      thresh = acceleration threshold in mg, 1–255 (default 50).
 
 wake                 Wake from sleep mode 1 (reboots to re-initialise peripherals).
+```
+
+### 2.8 Production test
+
+The device side of the production tester (`tools/production/prodtest.py`
+drives it over this console; every answer is one JSON line):
+
+```
+factory selftest [-w <ssid>]            Hardware self-test: identity, PSRAM, boot
+                                        counters, USB mux readback, IMU (id, gravity,
+                                        INT1 trace), LED, GPS (UART rx, module version,
+                                        satellites), storage, LTE stage/SIM; -w adds a
+                                        WiFi scan reporting that SSID's RSSI
+factory button <ms>                     Wait up to <ms> for a button press and release
+factory usbmux esp|ch343|bg95|off <ms>  Route the USB connector for <ms>, then back to
+                                        the DIP route (the console drops meanwhile)
+factory led red 0|1                     Drive the red LED on GPIO41
+factory mark [<serial> [station]]       Write (or print) the factory record
+                                        /data/factory.json
+factory coredump [erase]                Print the stored panic summary (task, cause, PC,
+                                        backtrace addresses) as JSON, or erase it
+factory gpio <n>                        Dump one pin's live configuration and level
+factory bootloader                      Reboot into ROM download mode (USB 303A:0009)
+                                        for an esptool erase or re-flash with the
+                                        DIP switch left in the run position
 ```

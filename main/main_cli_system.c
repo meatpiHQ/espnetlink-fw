@@ -261,12 +261,15 @@ static void sleep_power_off_peripherals(void)
     printf("Powering off GPS...\n");
     gpio_set_level(GPS_PWR_EN_PIN, 0);
 
-    // Turn off LEDs
-    gpio_set_level(LED_RED_PIN, 1);  // active-low: HIGH = OFF
+    // Turn off the red LED (active-low: HIGH = OFF)
+    gpio_set_level(LED_RED_PIN, 1);
 
-    gpio_reset_pin(LED_GPIO);
-    gpio_set_direction(LED_GPIO, GPIO_MODE_OUTPUT);
-    gpio_set_level(LED_GPIO, 0);
+    /* Hold the GPS module in reset while its rail is off. GPIO2 is the
+     * LC76G RESET_N (it was misnamed LED_GPIO); the drive survives the
+     * `wake` software reset, and gps_init releases it on the next boot. */
+    gpio_reset_pin(GPS_NRST_PIN);
+    gpio_set_direction(GPS_NRST_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_level(GPS_NRST_PIN, 0);
 }
 
 static esp_err_t prepare_mode_specific_wakeup(void)

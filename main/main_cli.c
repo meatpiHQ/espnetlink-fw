@@ -33,7 +33,7 @@ static const cfg_key_t KEYS[] =
     { "DEVICE_NAME",   "system",             "device_name",   CFG_KEY_STR,  "ESPNetLink", 0, false },
     { "LTE_ENABLED",   "lte_upstream_pppos", "enabled",       CFG_KEY_BOOL, NULL,         0, true  },
     { "GPS_ENABLED",   "gps",                "enabled",       CFG_KEY_BOOL, NULL,         0, true  },
-    { "NCM_SHARE",     "lte_upstream_pppos", "ncm_share",     CFG_KEY_BOOL, NULL,         0, true  },
+    { "NCM_SHARE",     "lte_upstream_pppos", "ncm_share",     CFG_KEY_BOOL, NULL,         0, false },
     { "AGNSS_ENABLED", "gps",                "agnss_enabled", CFG_KEY_BOOL, NULL,         0, true  },
     { "GPS_PASSTHRU",  "gps",                "passthru",      CFG_KEY_BOOL, NULL,         0, false },
     { "GPS_UART0_OUT", "gps",                "uart0_out",     CFG_KEY_BOOL, NULL,         0, false },
@@ -428,6 +428,11 @@ esp_err_t main_cli_register(void)
     if (err == ESP_OK)
     {
         err = main_cli_register_net();
+    }
+
+    if (err == ESP_OK)
+    {
+        err = main_cli_register_factory();
     }
 
     return err;

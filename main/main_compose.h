@@ -48,6 +48,7 @@ const char *main_system_device_name(void);
 esp_err_t main_cli_register(void);
 esp_err_t main_cli_register_system(void); /* ver/debug/system/reboot/sleep/wake */
 esp_err_t main_cli_register_net(void);    /* ping/speedtest                    */
+esp_err_t main_cli_register_factory(void); /* factory: the production test    */
 
 /* One-time /storage/config.json import. Call right after
  * settings_manager_start(); reboots once if values were imported. */
