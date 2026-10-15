@@ -5,6 +5,7 @@
 
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_mac.h"
 
 #include "freertos/FreeRTOS.h"
@@ -451,6 +452,35 @@ static void usbnet_notify_evt(uint32_t bits)
     }
 }
 
+/* esp_restart runs the shutdown handlers first: detach from the host so a
+ * warm reboot looks like an unplug. Without it a reboot with RNDIS traffic
+ * in flight left the DWC2 controller with a stale transfer that completed
+ * into the next image before its class was ready (panic in ISR context
+ * ~5 s after boot; coredump 2026-10-16). Soft-disconnect only: the core
+ * stays clocked, so nothing that still prints or sends can hang. */
+extern int usb_dc_soft_disconnect(uint8_t busid); /* vendored dwc2 port */
+
+static bool s_restart_detach = true;
+
+void usb_dev_ethernet_set_restart_detach(bool detach)
+{
+    s_restart_detach = detach;
+}
+
+static void usbnet_usb_shutdown(void)
+{
+    if (!s_restart_detach)
+    {
+        /* a restart into ROM download mode: the soft-disconnect bit would
+         * survive the reset and the ROM's OTG download device could never
+         * connect (bench 2026-10-16) */
+        return;
+    }
+
+    usb_cli_console_set_enabled(false);
+    (void)usb_dc_soft_disconnect(0);
+}
+
 static void usbnet_usbd_event_handler(uint8_t busid, uint8_t event)
 {
     (void)busid;
@@ -619,5 +649,15 @@ void usbnet_usb_start(void)
     if (usb_ret != 0)
     {
         ESP_LOGE(TAG, "usbd_initialize failed (%d)", usb_ret);
+    }
+    else
+    {
+        static bool s_shutdown_hooked;
+
+        if (!s_shutdown_hooked &&
+            esp_register_shutdown_handler(usbnet_usb_shutdown) == ESP_OK)
+        {
+            s_shutdown_hooked = true;
+        }
     }
 }

@@ -50,6 +50,13 @@ void usb_dev_ethernet_set_router_offer(bool enabled);
 // dns_ipv4_addr should be an IPv4 address in lwIP's internal format (same as esp_netif DNS info ip4.addr).
 esp_err_t usb_dev_ethernet_enable_sharing(uint32_t dns_ipv4_addr);
 
+/** Whether a software restart first drops the USB device off the bus
+ *  (default true: a warm reboot then looks like an unplug to the host, so
+ *  no transfer is in flight when the next image enumerates). false for a
+ *  restart meant to land in ROM download mode, where the ROM's OTG
+ *  download device needs the controller still connected. */
+void usb_dev_ethernet_set_restart_detach(bool detach);
+
 #ifdef __cplusplus
 }
 #endif
