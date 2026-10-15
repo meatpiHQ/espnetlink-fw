@@ -5,7 +5,9 @@
 #include "driver/uart.h"
 
 // GPIO Pin Definitions
-#define LED_GPIO               GPIO_NUM_2
+#define GPS_NRST_PIN           GPIO_NUM_2  /* LC76G RESET_N, active low (the
+                                              legacy name LED_GPIO was wrong:
+                                              nothing lights on this pin) */
 #define USB_SEL_1              GPIO_NUM_12
 #define USB_SEL_2              GPIO_NUM_10
 #define WAKE_GPIO              GPIO_NUM_1
